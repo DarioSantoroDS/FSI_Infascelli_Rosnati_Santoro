@@ -8,7 +8,7 @@ This is part of a project-work for Numerical Methods for Partial Differential Eq
 ### Authors
 Project developed by:
 - [Infascelli Riccardo](https://github.com/RiccardoInfascelli)
-- [Francesco Rosnati](https://github.com/RosNaviGator)
+- [Rosnati Francesco](https://github.com/RosNaviGator)
 - [Santoro Dario](https://github.com/DarioSantoroDS)
 
 ## Overview
