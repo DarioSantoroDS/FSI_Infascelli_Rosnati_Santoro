@@ -1,0 +1,19 @@
+subsection Geometry
+  set Number of cells per edge        = 8
+  set Stokes degree = 1
+  set Elasticity degree = 1
+#  set Fluid weight        = 100 
+#  set Solid weight        = 10
+end
+
+# fluid and solid weight only if the triangulation weighted partitioning is enabled
+
+subsection Refinement
+  set Refinement cycles = 8
+end
+
+subsection Physics
+  set Viscosity = 2.0
+  set mu = 1.0
+  set lambda = 1.0
+end
