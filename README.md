@@ -15,7 +15,7 @@ Project developed by:
 
 The mathematical model is:
 $$
-    \begin{cases}
+\begin{cases}
     -2 \nu \, \nabla \cdot \boldsymbol{\varepsilon}(\boldsymbol{u}) + \nabla p = 0, & \text{in } \Omega_{\text{fluid}}, \\[6pt]
     
     \nabla \cdot \boldsymbol{u} = 0, 
@@ -31,7 +31,7 @@ $$
     = \bigl( 2 \nu \, \boldsymbol{\varepsilon}(\boldsymbol{u}) - p\,\boldsymbol{I} \bigr)\boldsymbol{n}, 
     & \text{on } \Sigma.
 
-    \end{cases}
+\end{cases}
 $$
 
 Under the small-displacement assumption, the fluid velocity is forced to vanish on the fluid–solid interface.<!-- TO CHECK -->
