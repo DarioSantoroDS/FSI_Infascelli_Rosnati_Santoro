@@ -1304,6 +1304,32 @@ FluidStructureProblem::output_results(const unsigned int refinement_cycle) const
                            "material_id",
                            DataOut<dim>::type_cell_data);
 #ifdef EXACT
+  const QGauss<dim> stokes_quadrature(stokes_degree + 2);
+  const QGauss<dim> elasticity_quadrature(elasticity_degree + 2);
+
+  hp::QCollection<dim> q_collection;
+  q_collection.push_back(stokes_quadrature);
+  q_collection.push_back(elasticity_quadrature);
+  Vector<double> error_per_cell(triangulation.n_active_cells());
+
+  // const FEValuesExtractors::Vector velocities(0);
+  ComponentSelectFunction<dim> components(std::make_pair(0, dim),
+                                          dim + 1 + dim);
+  // std::cout << ExactSolution_onlyu::n_components() << "and"
+  // stokes_fe.n_components() << std::nedl
+
+  VectorTools::integrate_difference(dof_handler,
+                                    locally_relevant_solution,
+                                    ExactSolution_onlyu(),
+                                    error_per_cell,
+                                    q_collection,
+                                    VectorTools::L2_norm,
+                                    &components);
+  data_out.add_data_vector(error_per_cell,
+                           "error",
+                           DataOut<dim>::type_cell_data
+                           );
+
   ExactSolution_FSI<dim> exact_solution;
   Vector<double> exact(locally_relevant_solution.size());
 
@@ -1313,6 +1339,16 @@ FluidStructureProblem::output_results(const unsigned int refinement_cycle) const
                            "ex",
                            DataOut<dim>::type_dof_data,
                            data_component_interpretation);
+  Vector<double> compo(locally_relevant_solution.size());
+
+  VectorTools::interpolate(dof_handler, components, compo);
+
+
+  data_out.add_data_vector(compo,
+                           "components",
+                           DataOut<dim>::type_dof_data,
+                           data_component_interpretation);
+
 #endif
   data_out.build_patches();
 
@@ -1465,11 +1501,18 @@ void
 FluidStructureProblem::compute_velocity_error(
   const VectorTools::NormType &norm_type) const
 {
-  QGauss<dim>    quadrature(stokes_fe.degree + 2);
+  const QGauss<dim> stokes_quadrature(stokes_degree + 2);
+  const QGauss<dim> elasticity_quadrature(elasticity_degree + 2);
+
+  hp::QCollection<dim> q_collection;
+  q_collection.push_back(stokes_quadrature);
+  q_collection.push_back(elasticity_quadrature);
   Vector<double> error_per_cell(triangulation.n_active_cells());
 
   // const FEValuesExtractors::Vector velocities(0);
-  ComponentSelectFunction<dim>          components(std::make_pair(0, dim), dim + 1 + dim);
+  ComponentSelectFunction<dim> components(std::make_pair(0, dim),
+                                          dim + 1 + dim);
+                                          
   // std::cout << ExactSolution_onlyu::n_components() << "and"
   // stokes_fe.n_components() << std::nedl
 
@@ -1477,7 +1520,7 @@ FluidStructureProblem::compute_velocity_error(
                                     locally_relevant_solution,
                                     ExactSolution_onlyu(),
                                     error_per_cell,
-                                    quadrature,
+                                    q_collection,
                                     VectorTools::L2_norm,
                                     &components);
   std::cout << "Computed velocity error." << std::endl;
