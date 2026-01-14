@@ -54,6 +54,7 @@
 #include <deal.II/numerics/error_estimator.h>
 #include <deal.II/numerics/matrix_tools.h>
 #include <deal.II/numerics/vector_tools.h>
+#include <deal.II/numerics/vector_tools_integrate_difference.h>
 
 #include <petscviewer.h> // PETSc viewer
 
@@ -61,7 +62,8 @@
 #define ALTERNATIVE_PATTERN
 #define ITERATIVE_SOLVER
 // #define DIRECT_SOLVER
-// #define VERBOSE  define to have more output
+// #define VERBOSE  //define to have more output
+#define EXACT
 
 // When compiled in deal.II DEBUG mode, there is a problem:
 // depending on the version an assert inside the
@@ -124,6 +126,544 @@ class FluidStructureProblem
 {
 public:
   static constexpr unsigned int dim = 2;
+
+  template <int dim>
+  class ExactSolution_FSI : public Function<dim>
+  {
+  public:
+    ExactSolution_FSI()
+      : Function<dim>(dim + 1 + dim) // 5 componenti: u(2), p(1), d(2)
+    {}
+
+    // ======================
+    // valore singola componente
+    // ======================
+    virtual double
+    value(const Point<dim> &p, const unsigned int component = 0) const override
+    {
+      const double x = p[0];
+      const double y = p[1];
+
+      // -------- velocity u --------
+      if (component == 0) // u0
+        return (1.0 / 256.0) * std::pow(1.0 - 16.0 * x * x, 2) * y *
+               (-1.0 + 4.0 * y * y);
+
+      if (component == 1) // u1
+        return -(1.0 / 64.0) * x * (-1.0 + 16.0 * x * x) *
+               std::pow(1.0 - 4.0 * y * y, 2);
+
+      // -------- pressure p --------
+      if (component == 2)
+        return (x - 1.0 / 4.0) * (x + 1.0 / 4.0) * (y - 1.0 / 2.0) *
+               (y + 1.0 / 2.0);
+
+      // -------- displacement d --------
+      if (component == 3) // d0
+        return (1.0 / 256.0) * std::pow(1.0 - 16.0 * x * x, 2) * y *
+               (-1.0 + 4.0 * y * y);
+
+      if (component == 4) // d1
+        return -(1.0 / 64.0) * x * (-1.0 + 16.0 * x * x) *
+               std::pow(1.0 - 4.0 * y * y, 2);
+
+      return 0.0;
+    }
+
+    // ======================
+    // valore vettoriale
+    // ======================
+    virtual void
+    vector_value(const Point<dim> &p, Vector<double> &values) const override
+    {
+      AssertDimension(values.size(), this->n_components);
+      for (unsigned int c = 0; c < this->n_components; ++c)
+        values[c] = value(p, c);
+    }
+
+    // ======================
+    // gradiente vettoriale
+    // grad[i][j] = ∂(componente i)/∂x_j
+    // ======================
+    virtual void
+    vector_gradient(const Point<dim>            &p,
+                    std::vector<Tensor<1, dim>> &grad) const override
+    {
+      AssertDimension(grad.size(), this->n_components);
+
+      for (auto &g : grad)
+        g = 0.0;
+
+      const double x = p[0];
+      const double y = p[1];
+
+      // ---- grad u0 ----
+      grad[0][0] =
+        (1.0 / 4.0) * x * (-1.0 + 16.0 * x * x) * y * (-1.0 + 4.0 * y * y);
+
+      grad[0][1] =
+        (1.0 / 256.0) * std::pow(1.0 - 16.0 * x * x, 2) * (-1.0 + 12.0 * y * y);
+
+      // ---- grad u1 ----
+      grad[1][0] =
+        (1.0 / 64.0) * (1.0 - 48.0 * x * x) * std::pow(1.0 - 4.0 * y * y, 2);
+
+      grad[1][1] =
+        (1.0 / 4.0) * x * (-1.0 + 16.0 * x * x) * y * (1.0 - 4.0 * y * y);
+
+      // ---- grad p ----
+      grad[2][0] = (x - 1.0 / 4.0) * (y - 1.0 / 2.0) * (y + 1.0 / 2.0) +
+                   (x + 1.0 / 4.0) * (y - 1.0 / 2.0) * (y + 1.0 / 2.0);
+
+      grad[2][1] = (x - 1.0 / 4.0) * (x + 1.0 / 4.0) * (y - 1.0 / 2.0) +
+                   (x - 1.0 / 4.0) * (x + 1.0 / 4.0) * (y + 1.0 / 2.0);
+
+      // ---- grad d0 ----
+      grad[3][0] = grad[0][0];
+      grad[3][1] = grad[0][1];
+
+      // ---- grad d1 ----
+      grad[4][0] = grad[1][0];
+      grad[4][1] = grad[1][1];
+    }
+  };
+
+
+  class ExactSolution_u : public Function<dim>
+  {
+  public:
+    ExactSolution_u()
+      : Function<dim>(dim + 1 + dim) // 5 componenti
+    {}
+
+    // ======================
+    // valore singola componente
+    // ======================
+    virtual double
+    value(const Point<dim> &p, const unsigned int component = 0) const override
+    {
+      const double x = p[0];
+      const double y = p[1];
+
+      if (component == 0)
+        return (1.0 / 256.0) * std::pow(1.0 - 16.0 * x * x, 2) * y *
+               (-1.0 + 4.0 * y * y);
+
+      if (component == 1)
+        return -(1.0 / 64.0) * x * (-1.0 + 16.0 * x * x) *
+               std::pow(1.0 - 4.0 * y * y, 2);
+
+      return 0.0;
+    }
+
+    // ======================
+    // valore vettoriale
+    // ======================
+    virtual void
+    vector_value(const Point<dim> &p, Vector<double> &values) const override
+    {
+      AssertDimension(values.size(), this->n_components);
+
+      for (unsigned int c = 0; c < this->n_components; ++c)
+        values[c] = value(p, c);
+    }
+
+    // ======================
+    // gradiente
+    // grad[i][j] = ∂ u_i / ∂ x_j
+    // ======================
+    virtual void
+    vector_gradient(const Point<dim>            &p,
+                    std::vector<Tensor<1, dim>> &grad) const override
+    {
+      AssertDimension(grad.size(), dim);
+
+      const double x = p[0];
+      const double y = p[1];
+
+      // ∂u0/∂x
+      grad[0][0] =
+        (1.0 / 4.0) * x * (-1.0 + 16.0 * x * x) * y * (-1.0 + 4.0 * y * y);
+
+      // ∂u0/∂y
+      grad[0][1] =
+        (1.0 / 256.0) * std::pow(1.0 - 16.0 * x * x, 2) * (-1.0 + 12.0 * y * y);
+
+      // ∂u1/∂x
+      grad[1][0] =
+        (1.0 / 64.0) * (1.0 - 48.0 * x * x) * std::pow(1.0 - 4.0 * y * y, 2);
+
+      // ∂u1/∂y
+      grad[1][1] =
+        (1.0 / 4.0) * x * (-1.0 + 16.0 * x * x) * y * (1.0 - 4.0 * y * y);
+    }
+  };
+
+  class ExactSolution_onlyu : public Function<dim>
+  {
+  public:
+    ExactSolution_onlyu()
+      : Function<dim>(dim) // 2 componenti
+    {}
+
+    // ======================
+    // valore singola componente
+    // ======================
+    virtual double
+    value(const Point<dim> &p, const unsigned int component = 0) const override
+    {
+      const double x = p[0];
+      const double y = p[1];
+
+      if (component == 0)
+        return (1.0 / 256.0) * std::pow(1.0 - 16.0 * x * x, 2) * y *
+               (-1.0 + 4.0 * y * y);
+
+      if (component == 1)
+        return -(1.0 / 64.0) * x * (-1.0 + 16.0 * x * x) *
+               std::pow(1.0 - 4.0 * y * y, 2);
+
+      return 0.0;
+    }
+
+    // ======================
+    // valore vettoriale
+    // ======================
+    virtual void
+    vector_value(const Point<dim> &p, Vector<double> &values) const override
+    {
+      AssertDimension(values.size(), this->n_components);
+
+      for (unsigned int c = 0; c < this->n_components; ++c)
+        values[c] = value(p, c);
+    }
+
+    virtual void
+    vector_gradient(const Point<dim>            &p,
+                    std::vector<Tensor<1, dim>> &grad) const override
+    {
+      AssertDimension(grad.size(), dim);
+
+      const double x = p[0];
+      const double y = p[1];
+
+      // ∂u0/∂x
+      grad[0][0] =
+        (1.0 / 4.0) * x * (-1.0 + 16.0 * x * x) * y * (-1.0 + 4.0 * y * y);
+
+      // ∂u0/∂y
+      grad[0][1] =
+        (1.0 / 256.0) * std::pow(1.0 - 16.0 * x * x, 2) * (-1.0 + 12.0 * y * y);
+
+      // ∂u1/∂x
+      grad[1][0] =
+        (1.0 / 64.0) * (1.0 - 48.0 * x * x) * std::pow(1.0 - 4.0 * y * y, 2);
+
+      // ∂u1/∂y
+      grad[1][1] =
+        (1.0 / 4.0) * x * (-1.0 + 16.0 * x * x) * y * (1.0 - 4.0 * y * y);
+    }
+  };
+
+  class ExactSolution_d : public Function<dim>
+  {
+  public:
+    ExactSolution_d()
+      : Function<dim>(dim + 1 + dim) // 5 componenti
+    {}
+
+    // ======================
+    // valore singola componente
+    // ======================
+    virtual double
+    value(const Point<dim> &p, const unsigned int component = 0) const override
+    {
+      const double x = p[0];
+      const double y = p[1];
+
+      if (component == 3) // d0
+        return (1.0 / 256.0) * std::pow(1.0 - 16.0 * x * x, 2) * y *
+               (-1.0 + 4.0 * y * y);
+
+      if (component == 4) // d1
+        return -(1.0 / 64.0) * x * (-1.0 + 16.0 * x * x) *
+               std::pow(1.0 - 4.0 * y * y, 2);
+
+      return 0.0;
+    }
+
+    // ======================
+    // valore vettoriale
+    // ======================
+    virtual void
+    vector_value(const Point<dim> &p, Vector<double> &values) const override
+    {
+      for (unsigned int c = 0; c < this->n_components; ++c)
+        values[c] = value(p, c);
+    }
+
+    // ======================
+    // gradiente
+    // grad[i][j] = ∂(componente i)/∂x_j
+    // ======================
+    virtual void
+    vector_gradient(const Point<dim>            &p,
+                    std::vector<Tensor<1, dim>> &grad) const override
+    {
+      // inizializza tutto a zero
+      for (auto &g : grad)
+        g = 0.0;
+
+      const double x = p[0];
+      const double y = p[1];
+
+      // ∂d0/∂x
+      grad[3][0] =
+        (1.0 / 4.0) * x * (-1.0 + 16.0 * x * x) * y * (-1.0 + 4.0 * y * y);
+
+      // ∂d0/∂y
+      grad[3][1] =
+        (1.0 / 256.0) * std::pow(1.0 - 16.0 * x * x, 2) * (-1.0 + 12.0 * y * y);
+
+      // ∂d1/∂x
+      grad[4][0] =
+        (1.0 / 64.0) * (1.0 - 48.0 * x * x) * std::pow(1.0 - 4.0 * y * y, 2);
+
+      // ∂d1/∂y
+      grad[4][1] =
+        (1.0 / 4.0) * x * (-1.0 + 16.0 * x * x) * y * (1.0 - 4.0 * y * y);
+    }
+  };
+
+  class ExactSolution_p : public Function<dim>
+  {
+  public:
+    ExactSolution_p()
+      : Function<dim>(dim + 1 + dim) // 5 componenti
+    {}
+
+    // ======================
+    // valore singola componente
+    // ======================
+    virtual double
+    value(const Point<dim> &p, const unsigned int component = 0) const override
+    {
+      const double x = p[0];
+      const double y = p[1];
+
+      if (component == 2) // pressione
+        return (x - 1.0 / 4.0) * (x + 1.0 / 4.0) * (y - 1.0 / 2.0) *
+               (y + 1.0 / 2.0);
+
+      return 0.0;
+    }
+
+    // ======================
+    // valore vettoriale
+    // ======================
+    virtual void
+    vector_value(const Point<dim> &p, Vector<double> &values) const override
+    {
+      for (unsigned int c = 0; c < this->n_components; ++c)
+        values[c] = value(p, c);
+    }
+
+    // ======================
+    // gradiente vettoriale
+    // grad[i][j] = ∂(componente i)/∂x_j
+    // ======================
+    virtual void
+    vector_gradient(const Point<dim>            &p,
+                    std::vector<Tensor<1, dim>> &grad) const override
+    {
+      // tutto a zero
+      for (auto &g : grad)
+        g = 0.0;
+
+      const double x = p[0];
+      const double y = p[1];
+
+      // ∂p/∂x  → componente 2
+      grad[2][0] = (x - 1.0 / 4.0) * (y - 1.0 / 2.0) * (y + 1.0 / 2.0) +
+                   (x + 1.0 / 4.0) * (y - 1.0 / 2.0) * (y + 1.0 / 2.0);
+
+      // ∂p/∂y  → componente 2
+      grad[2][1] = (x - 1.0 / 4.0) * (x + 1.0 / 4.0) * (y - 1.0 / 2.0) +
+                   (x - 1.0 / 4.0) * (x + 1.0 / 4.0) * (y + 1.0 / 2.0);
+    }
+  };
+
+  class ExactForce_f : public Function<dim>
+  {
+  public:
+    ExactForce_f(const double viscosity)
+      : Function<dim>(dim + 1 + dim)
+      , nu(viscosity)
+    {}
+
+    // ======================
+    // valore singola componente
+    // ======================
+    virtual double
+    value(const Point<dim> &p, const unsigned int component) const override
+    {
+      const double x = p[0];
+      const double y = p[1];
+
+      if (component == 0)
+        return x * (-0.5 + 2.0 * y * y) - (11.0 / 32.0) * y * nu -
+               24.0 * std::pow(x, 4) * y * nu + std::pow(y, 3) * nu +
+               3.0 * x * x * y * (5.0 - 16.0 * y * y) * nu;
+
+      if (component == 1)
+        return (-1.0 / 8.0 + 2.0 * x * x) * y + (7.0 / 4.0) * x * nu -
+               4.0 * std::pow(x, 3) * nu +
+               3.0 * x * (-5.0 + 16.0 * x * x) * y * y * nu +
+               24.0 * x * std::pow(y, 4) * nu;
+
+      return 0.0;
+    }
+
+    // ======================
+    // valore vettoriale
+    // ======================
+    virtual void
+    vector_value(const Point<dim> &p, Vector<double> &values) const override
+    {
+      for (unsigned int c = 0; c < this->n_components; ++c)
+        values[c] = value(p, c);
+    }
+
+  private:
+    const double nu;
+  };
+
+
+
+  class ExactForce_g : public Function<dim>
+  {
+  public:
+    ExactForce_g(const double mu_)
+      : Function<dim>(dim + 1 + dim) // 5 componenti
+      , mu(mu_)
+    {}
+
+    virtual double
+    value(const Point<dim> &p, const unsigned int component = 0) const override
+    {
+      const double x = p[0];
+      const double y = p[1];
+
+      if (component == 3)
+        return (-(11.0 / 32.0) + 15.0 * x * x - 24.0 * std::pow(x, 4)) * y *
+                 mu +
+               std::pow(y, 3) * (mu - 48.0 * x * x * mu);
+
+      if (component == 4)
+        return 1.0 / 4.0 * x *
+               (7.0 - 60.0 * y * y + 96.0 * std::pow(y, 4) +
+                16.0 * x * x * (-1.0 + 12.0 * y * y)) *
+               mu;
+
+      return 0.0;
+    }
+
+    virtual void
+    vector_value(const Point<dim> &p, Vector<double> &values) const override
+    {
+      AssertDimension(values.size(), this->n_components);
+
+      for (unsigned int c = 0; c < this->n_components; ++c)
+        values[c] = value(p, c);
+    }
+
+  private:
+    const double mu;
+  };
+
+
+
+  class ExactNeumann_hRight : public Function<dim>
+  {
+  public:
+    ExactNeumann_hRight(const double viscosity_)
+      : Function<dim>(dim + 1 + dim) // 5 componenti
+      , nu(viscosity_)
+    {}
+
+    virtual double
+    value(const Point<dim> &p, const unsigned int component = 0) const override
+    {
+      const double x = p[0];
+      const double y = p[1];
+
+      if (component == 0)
+        return 1.0 / 64.0 * (-1.0 + 16.0 * x * x) * (-1.0 + 4.0 * y * y) *
+               (-1.0 + 32.0 * x * y * nu);
+
+      if (component == 1)
+        return 1.0 / 256.0 *
+               (4.0 * (1.0 - 48.0 * x * x) * std::pow(1.0 - 4.0 * y * y, 2) +
+                std::pow(1.0 - 16.0 * x * x, 2) * (-1.0 + 12.0 * y * y)) *
+               nu;
+
+      return 0.0;
+    }
+
+    virtual void
+    vector_value(const Point<dim> &p, Vector<double> &values) const override
+    {
+      AssertDimension(values.size(), this->n_components);
+
+      for (unsigned int c = 0; c < this->n_components; ++c)
+        values[c] = value(p, c);
+    }
+
+  private:
+    const double nu;
+  };
+
+  class ExactNeumann_hLeft : public Function<dim>
+  {
+  public:
+    ExactNeumann_hLeft(const double viscosity_)
+      : Function<dim>(dim + 1 + dim) // 5 componenti
+      , nu(viscosity_)
+    {}
+
+    virtual double
+    value(const Point<dim> &p, const unsigned int component = 0) const override
+    {
+      const double x = p[0];
+      const double y = p[1];
+
+
+      if (component == 0)
+        return -(1.0 / 64.0) * (-1.0 + 16.0 * x * x) * (-1.0 + 4.0 * y * y) *
+               (-1.0 + 32.0 * x * y * nu);
+
+      if (component == 1)
+        return -(1.0 / 256.0) *
+               (4.0 * (1.0 - 48.0 * x * x) * std::pow(1.0 - 4.0 * y * y, 2) +
+                std::pow(1.0 - 16.0 * x * x, 2) * (-1.0 + 12.0 * y * y)) *
+               nu;
+
+      return 0.0;
+    }
+
+    virtual void
+    vector_value(const Point<dim> &p, Vector<double> &values) const override
+    {
+      AssertDimension(values.size(), this->n_components);
+
+      for (unsigned int c = 0; c < this->n_components; ++c)
+        values[c] = value(p, c);
+    }
+
+  private:
+    const double nu;
+  };
+
   // constructor
   FluidStructureProblem(ParameterHandler &param)
     : prm(param)
@@ -194,6 +734,8 @@ public:
   void
   output_matrix() const; // not anymore implemented
 #endif
+  void
+  compute_velocity_error(const VectorTools::NormType &norm_type) const;
   void
   refine_mesh(const unsigned int n_cycle);
 

@@ -47,6 +47,10 @@ main(int argc, char *argv[])
       flow_problem.solve(); // direct solver not anymore implemented, we used it when the matrix was not a block matrix
 #endif
       flow_problem.output_results(refinement_cycle);
+      flow_problem.compute_velocity_error(VectorTools::L2_norm);
+      // double h1_error =
+      // flow_problem.compute_velocity_error(VectorTools::H1_seminorm);
+
       flow_problem.timer.print_summary();
       flow_problem.timer.reset();
     }
