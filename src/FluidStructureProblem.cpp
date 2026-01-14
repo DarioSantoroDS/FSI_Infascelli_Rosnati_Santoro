@@ -724,7 +724,7 @@ FluidStructureProblem::assemble_system()
               for (unsigned int i = 0; i < dofs_per_cell; ++i)
                 for (unsigned int j = 0; j < dofs_per_cell; ++j)
                   local_matrix(i, j) +=
-                    (viscosity * stokes_symgrad_phi_u[i] *
+                    (2*viscosity * stokes_symgrad_phi_u[i] *
                        stokes_symgrad_phi_u[j] -
                      stokes_div_phi_u[i] * stokes_phi_p[j] -
                      stokes_phi_p[i] * stokes_div_phi_u[j]) *
