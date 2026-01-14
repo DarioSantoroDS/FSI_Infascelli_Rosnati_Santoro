@@ -13,7 +13,7 @@ subsection Refinement
 end
 
 subsection Physics
-  set Viscosity = 2.0
+  set Viscosity = 1.0
   set mu = 1.0
   set lambda = 1.0
 end

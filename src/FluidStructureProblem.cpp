@@ -1514,7 +1514,7 @@ FluidStructureProblem::compute_velocity_error(
                                           dim + 1 + dim);
                                           
   // std::cout << ExactSolution_onlyu::n_components() << "and"
-  // stokes_fe.n_components() << std::nedl
+  // stokes_fe.n_components() << std::endl;
 
   VectorTools::integrate_difference(dof_handler,
                                     locally_relevant_solution,
@@ -1523,6 +1523,14 @@ FluidStructureProblem::compute_velocity_error(
                                     q_collection,
                                     VectorTools::L2_norm,
                                     &components);
+
+  for (const auto &cell : dof_handler.active_cell_iterators())
+  {
+    if (cell->material_id() != fluid_domain_id)
+      error_per_cell[cell->active_cell_index()] = 0.0;
+  }                                  
+
+
   std::cout << "Computed velocity error." << std::endl;
 
   double velocity_error =
