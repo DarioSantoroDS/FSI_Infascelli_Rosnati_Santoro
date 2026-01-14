@@ -2,6 +2,7 @@
 #define FluidStructureInteractionProblem
 
 #include <deal.II/base/conditional_ostream.h>
+#include <deal.II/base/convergence_table.h>
 #include <deal.II/base/function.h>
 #include <deal.II/base/index_set.h>
 #include <deal.II/base/logstream.h>
@@ -64,6 +65,8 @@
 // #define DIRECT_SOLVER
 // #define VERBOSE  //define to have more output
 #define EXACT
+#define EXACT_TABLE
+
 
 // When compiled in deal.II DEBUG mode, there is a problem:
 // depending on the version an assert inside the
@@ -735,9 +738,17 @@ public:
   output_matrix() const; // not anymore implemented
 #endif
   void
+  compute_error(const unsigned int refinement_cycle);
+  double
   compute_velocity_error(const VectorTools::NormType &norm_type) const;
+  double
+  compute_pressure_error(const VectorTools::NormType &norm_type) const;
+  double
+  compute_displacement_error(const VectorTools::NormType &norm_type) const;
   void
   refine_mesh(const unsigned int n_cycle);
+  void
+  output_table();
 
 
   // Boundary values for the Stokes equations
@@ -1230,6 +1241,11 @@ private:
   IndexSet              locally_relevant_dofs;
   std::vector<IndexSet> block_owned_dofs;
   std::vector<IndexSet> block_relevant_dofs;
+#ifdef EXACT_TABLE
+  ConvergenceTable velocity_convergence_table;
+  ConvergenceTable pressure_convergence_table;
+  ConvergenceTable displacement_convergence_table;
+#endif
 };
 
 #endif

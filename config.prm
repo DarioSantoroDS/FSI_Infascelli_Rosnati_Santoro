@@ -9,7 +9,7 @@ end
 # fluid and solid weight only if the triangulation weighted partitioning is enabled
 
 subsection Refinement
-  set Refinement cycles = 8
+  set Refinement cycles = 4
 end
 
 subsection Physics

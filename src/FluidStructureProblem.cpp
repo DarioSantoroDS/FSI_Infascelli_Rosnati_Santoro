@@ -100,11 +100,10 @@ FluidStructureProblem::make_grid()
 {
   TimerOutput::Scope t(timer, "make_grid");
   pcout << "   Generating the mesh..." << std::endl;
-  // useful if we want to set different weights to the cells in different physics domains
-  // prm.enter_subsection("Geometry");
-  // const int fluid_weight = prm.get_integer("Fluid weight");
-  // const int solid_weight = prm.get_integer("Solid weight");
-  // prm.leave_subsection();
+  // useful if we want to set different weights to the cells in different
+  // physics domains prm.enter_subsection("Geometry"); const int fluid_weight =
+  // prm.get_integer("Fluid weight"); const int solid_weight =
+  // prm.get_integer("Solid weight"); prm.leave_subsection();
   GridGenerator::subdivided_hyper_cube(triangulation, problemsize, -1, 1);
 #ifdef EXACT
   for (const auto &cell : triangulation.active_cell_iterators())
@@ -119,31 +118,49 @@ FluidStructureProblem::make_grid()
     }
 
   for (const auto &cell : triangulation.active_cell_iterators())
-  {
+    {
+      if (cell->material_id() == fluid_domain_id)
+        {
+          for (const auto &face : cell->face_iterators())
+            {
+              if (!face->at_boundary())
+                continue;
+              const auto &x = face->center();
 
-    if (cell->material_id() != fluid_domain_id)
-      continue; // SOLO fluido
+              // sopra
+              if (std::fabs(x[dim - 1] - 1.0) < 1e-12)
+                face->set_all_boundary_ids(1);
 
-    for (const auto &face : cell->face_iterators())
-      {
-        if (!face->at_boundary())
-          continue;
+              // sinistra
+              else if (std::fabs(x[0] + 1.0) < 1e-12)
+                face->set_all_boundary_ids(2);
 
-        const auto &x = face->center();
+              // destra
+              else if (std::fabs(x[0] - 1.0) < 1e-12)
+                face->set_all_boundary_ids(3);
+            }
+        }
+      else if (cell->material_id() == solid_domain_id)
+        {
+          for (const auto &face : cell->face_iterators())
+            {
+              if (!face->at_boundary())
+                continue;
+              const auto &x = face->center();
+              // sinistra
+              if (std::fabs(x[0] + 1.0) < 1e-12)
+                face->set_all_boundary_ids(4);
 
-        // sopra
-        if (std::fabs(x[dim - 1] - 1.0) < 1e-12)
-          face->set_all_boundary_ids(1);
+              // destra
+              else if (std::fabs(x[0] - 1.0) < 1e-12)
+                face->set_all_boundary_ids(4);
 
-        // sinistra
-        else if (std::fabs(x[0] + 1.0) < 1e-12)
-          face->set_all_boundary_ids(2);
-
-        // destra
-        else if (std::fabs(x[0] - 1.0) < 1e-12)
-          face->set_all_boundary_ids(3);
-      }
-  }
+              // fondo
+              else if (std::fabs(x[dim - 1] + 1.0) < 1e-12)
+                face->set_all_boundary_ids(4);
+            }
+        }
+    }
 #else
   for (const auto &cell : triangulation.active_cell_iterators())
     {
@@ -162,32 +179,33 @@ FluidStructureProblem::make_grid()
         cell->set_material_id(solid_domain_id);
     }
 #endif
-//  functions necessary to use for the 
-//  parallel::distributed::Triangulation::::execute_coarsening_and_refinement()	
-//  method when giving weights to the cells in different physics domains.
+    //  functions necessary to use for the
+    //  parallel::distributed::Triangulation::::execute_coarsening_and_refinement()
+    //  method when giving weights to the cells in different physics domains.
 
-  // triangulation.signals.cell_weight.connect(
-  //   [&](const typename
-  //   parallel::distributed::Triangulation<dim>::cell_iterator
-  //         &cell,
-  //       const typename parallel::distributed::Triangulation<dim>::CellStatus
-  //         status) -> unsigned int {
-  //     // If the cell is in the fluid domain, make it "heavy".
-  //     // This forces the partitioner to put FEWER fluid cells on a process.
-  //     if (cell->material_id() == fluid_domain_id)
-  //       {
-  //         // Adjust this ratio based on actual cost (e.g., 5x, 10x expensive)
-  //         return fluid_weight;
-  //       }
-  //     else
-  //       {
-  //         // Solid cells are "light", so a process can handle many of them.
-  //         return solid_weight;
-  //       }
-  //   });
+    // triangulation.signals.cell_weight.connect(
+    //   [&](const typename
+    //   parallel::distributed::Triangulation<dim>::cell_iterator
+    //         &cell,
+    //       const typename
+    //       parallel::distributed::Triangulation<dim>::CellStatus
+    //         status) -> unsigned int {
+    //     // If the cell is in the fluid domain, make it "heavy".
+    //     // This forces the partitioner to put FEWER fluid cells on a process.
+    //     if (cell->material_id() == fluid_domain_id)
+    //       {
+    //         // Adjust this ratio based on actual cost (e.g., 5x, 10x
+    //         expensive) return fluid_weight;
+    //       }
+    //     else
+    //       {
+    //         // Solid cells are "light", so a process can handle many of them.
+    //         return solid_weight;
+    //       }
+    //   });
 
-  // // Force a repartition now that weights and IDs are defined
-  // triangulation.repartition();
+    // // Force a repartition now that weights and IDs are defined
+    // triangulation.repartition();
 #ifdef VERBOSE
   pcout << "Mesh generated!" << std::endl;
 #endif
@@ -219,7 +237,8 @@ FluidStructureProblem::setup_dofs()
 
   set_active_fe_indices();
   dof_handler.distribute_dofs(fe_collection);
-  // DoFRenumbering::Cuthill_McKee(dof_handler); // we tried to use this, but didn't seem to help
+  // DoFRenumbering::Cuthill_McKee(dof_handler); // we tried to use this, but
+  // didn't seem to help
   std::vector<unsigned int> block_component(dim + 1 + dim, 0);
   block_component[dim] = 1;
   for (unsigned int i = dim + 1; i < dim + dim + 1; ++i)
@@ -228,7 +247,7 @@ FluidStructureProblem::setup_dofs()
 
   locally_owned_dofs = dof_handler.locally_owned_dofs();
   DoFTools::extract_locally_relevant_dofs(dof_handler, locally_relevant_dofs);
-// set up for the block structure
+  // set up for the block structure
   std::vector<types::global_dof_index> dofs_per_block =
     DoFTools::count_dofs_per_fe_block(dof_handler, block_component);
   const unsigned int n_u = dofs_per_block[0];
@@ -278,7 +297,7 @@ FluidStructureProblem::setup_dofs()
   const FEValuesExtractors::Vector displacements(dim + 1);
   VectorTools::interpolate_boundary_values(
     dof_handler,
-    0,
+    4,
     ExactSolution_d(),
     // Functions::ZeroFunction<dim>(dim + 1 + dim),
     constraints,
@@ -424,8 +443,9 @@ FluidStructureProblem::setup_dofs()
   // then also set vectors to their correct sizes:
 #ifdef FORCE_USE_OF_TRILINOS
 #  ifndef ALTERNATIVE_PATTERN
-  // Right now this pattern is not working, but we tested it in the past and didn't yelded 
-  // different results from the alternative one, so we keep it commented out for possible future use.
+  // Right now this pattern is not working, but we tested it in the past and
+  // didn't yelded different results from the alternative one, so we keep it
+  // commented out for possible future use.
   TrilinosWrappers::BlockSparsityPattern dsp(block_owned_dofs,
                                              block_owned_dofs,
                                              block_relevant_dofs,
@@ -492,7 +512,8 @@ FluidStructureProblem::setup_dofs()
 #  endif
 #endif
 #ifdef ALTERNATIVE_PATTERN
-// resetting the matrix and pressure mass in case they were already initialized
+  // resetting the matrix and pressure mass in case they were already
+  // initialized
   system_matrix.clear();
   pressure_mass.clear();
   BlockDynamicSparsityPattern dsp(dofs_per_block, dofs_per_block);
@@ -528,7 +549,7 @@ FluidStructureProblem::setup_dofs()
 
   constraints.condense(dsp);
 
-  dsp.compress(); 
+  dsp.compress();
   system_matrix.reinit(block_owned_dofs, dsp, MPI_COMM_WORLD);
   system_rhs.reinit(block_owned_dofs, MPI_COMM_WORLD);
 
@@ -572,12 +593,12 @@ FluidStructureProblem::assemble_system()
   system_rhs    = 0.0;
   pressure_mass = 0.0;
 #ifdef EXACT
-    ExactForce_f right_hand_side(viscosity);
-  ExactForce_g solid_rhs(mu);
+  ExactForce_f        right_hand_side(viscosity);
+  ExactForce_g        solid_rhs(mu);
   ExactNeumann_hRight neumann_rhs(viscosity);
-  ExactNeumann_hLeft neumann_left(viscosity);
+  ExactNeumann_hLeft  neumann_left(viscosity);
 #endif
-// setting all the objects needed for the assembly process
+  // setting all the objects needed for the assembly process
   const QGauss<dim> stokes_quadrature(stokes_degree + 2);
   const QGauss<dim> elasticity_quadrature(elasticity_degree + 2);
 
@@ -679,9 +700,9 @@ FluidStructureProblem::assemble_system()
       // The actual computation of the local matrix is the same as in
       // step-22 as well as that given in the @ref vector_valued
       // documentation module for the elasticity equations:
-  
+
       if (cell_is_in_fluid_domain(cell))
-  #ifdef EXACT
+#ifdef EXACT
         {
           const unsigned int dofs_per_cell = cell->get_fe().n_dofs_per_cell();
           Assert(dofs_per_cell == stokes_dofs_per_cell, ExcInternalError());
@@ -714,7 +735,8 @@ FluidStructureProblem::assemble_system()
                 {
                   const Tensor<1, dim> phi_iflu =
                     fe_values[velocities].value(i, q);
-                  local_rhs[i] += scalar_product(f_q, phi_iflu) * fe_values.JxW(q);
+                  local_rhs[i] +=
+                    scalar_product(f_q, phi_iflu) * fe_values.JxW(q);
 
                   // const Tensor<1, dim> phi_isol=
                   // fe_values[displacements].value(i, q); local_rhs[i] += g_q *
@@ -724,27 +746,26 @@ FluidStructureProblem::assemble_system()
               for (unsigned int i = 0; i < dofs_per_cell; ++i)
                 for (unsigned int j = 0; j < dofs_per_cell; ++j)
                   local_matrix(i, j) +=
-                    (2*viscosity * stokes_symgrad_phi_u[i] *
+                    (2 * viscosity * stokes_symgrad_phi_u[i] *
                        stokes_symgrad_phi_u[j] -
                      stokes_div_phi_u[i] * stokes_phi_p[j] -
                      stokes_phi_p[i] * stokes_div_phi_u[j]) *
                     fe_values.JxW(q);
-                
             }
-                      std::vector<unsigned int> neumann_boundaries = {2, 3};
+          std::vector<unsigned int> neumann_boundaries = {2, 3};
           for (unsigned int f = 0; f < GeometryInfo<dim>::faces_per_cell; ++f)
             {
-                if (cell->face(f)->at_boundary())
+              if (cell->face(f)->at_boundary())
                 {
-                    unsigned int bid = cell->face(f)->boundary_id();
-                    Function<dim> *neumann = nullptr;
+                  unsigned int   bid     = cell->face(f)->boundary_id();
+                  Function<dim> *neumann = nullptr;
 
-                    if (bid == 3)
-                        neumann = &neumann_rhs;
-                    else if (bid == 2)
-                        neumann = &neumann_left;
+                  if (bid == 3)
+                    neumann = &neumann_rhs;
+                  else if (bid == 2)
+                    neumann = &neumann_left;
 
-                    if (neumann)
+                  if (neumann)
                     {
                       FEFaceValues<dim> fe_face_values(
                         stokes_fe,
@@ -758,279 +779,314 @@ FluidStructureProblem::assemble_system()
                            q < fe_face_values.n_quadrature_points;
                            ++q)
                         {
-                            const Point<dim> &p_q = fe_face_values.quadrature_point(q);
-                            Tensor<1, dim> t_q;
-                            for (unsigned int d = 0; d < dim; ++d)
-                                t_q[d] = neumann->value(p_q, d);
+                          const Point<dim> &p_q =
+                            fe_face_values.quadrature_point(q);
+                          Tensor<1, dim> t_q;
+                          for (unsigned int d = 0; d < dim; ++d)
+                            t_q[d] = neumann->value(p_q, d);
 
-                            for (unsigned int i = 0; i < stokes_dofs_per_cell; ++i)
+                          for (unsigned int i = 0; i < stokes_dofs_per_cell;
+                               ++i)
                             {
-                                const Tensor<1, dim> phi_i = fe_face_values[velocities].value(i, q);
-                                local_rhs[i] += t_q * phi_i * fe_face_values.JxW(q);
+                              const Tensor<1, dim> phi_i =
+                                fe_face_values[velocities].value(i, q);
+                              local_rhs[i] +=
+                                t_q * phi_i * fe_face_values.JxW(q);
                             }
                         }
                     }
                 }
             }
-
         }
 #else
-          {
-            const unsigned int dofs_per_cell = cell->get_fe().n_dofs_per_cell();
-            Assert(dofs_per_cell == stokes_dofs_per_cell, ExcInternalError());
+        {
+          const unsigned int dofs_per_cell = cell->get_fe().n_dofs_per_cell();
+          Assert(dofs_per_cell == stokes_dofs_per_cell, ExcInternalError());
 
-            for (unsigned int q = 0; q < fe_values.n_quadrature_points; ++q)
-              {
-                for (unsigned int k = 0; k < dofs_per_cell; ++k)
-                  {
-                    stokes_symgrad_phi_u[k] =
-                      fe_values[velocities].symmetric_gradient(k, q);
-                    stokes_div_phi_u[k] =
-                      fe_values[velocities].divergence(k, q);
-                    stokes_phi_p[k] = fe_values[pressure].value(k, q);
-                  }
-
-                for (unsigned int i = 0; i < dofs_per_cell; ++i)
-                  for (unsigned int j = 0; j < dofs_per_cell; ++j)
-                    local_matrix(i, j) +=
-                      (2 * viscosity * stokes_symgrad_phi_u[i] *
-                         stokes_symgrad_phi_u[j] -
-                       stokes_div_phi_u[i] * stokes_phi_p[j] -
-                       stokes_phi_p[i] * stokes_div_phi_u[j]) *
-                      fe_values.JxW(q);
-              }
-          }
-#endif
-          else
-          {
-            const unsigned int dofs_per_cell = cell->get_fe().n_dofs_per_cell();
-            Assert(dofs_per_cell == elasticity_dofs_per_cell,
-                   ExcInternalError());
-
-            for (unsigned int q = 0; q < fe_values.n_quadrature_points; ++q)
-              {
-                for (unsigned int k = 0; k < dofs_per_cell; ++k)
-                  {
-                    elasticity_grad_phi[k] =
-                      fe_values[displacements].gradient(k, q);
-                    elasticity_div_phi[k] =
-                      fe_values[displacements].divergence(k, q);
-                  }
-
-                for (unsigned int i = 0; i < dofs_per_cell; ++i)
-                  for (unsigned int j = 0; j < dofs_per_cell; ++j)
-                    {
-                      local_matrix(i, j) +=
-                        (lambda * elasticity_div_phi[i] *
-                           elasticity_div_phi[j] +
-                         mu * scalar_product(elasticity_grad_phi[i],
-                                             elasticity_grad_phi[j]) +
-                         mu *
-                           scalar_product(elasticity_grad_phi[i],
-                                          transpose(elasticity_grad_phi[j]))) *
-                        fe_values.JxW(q);
-                    }
-              }
-          }
-          // Once we have the contributions from cell integrals, we copy them
-          // into the global matrix (taking care of constraints right away,
-          // through the AffineConstraints::distribute_local_to_global
-          // function). Note that we have not written anything into the
-          // <code>local_rhs</code> variable, though we still need to pass it
-          // along since the elimination of nonzero boundary values requires the
-          // modification of local and consequently also global right hand side
-          // values:
-          local_dof_indices.resize(cell->get_fe().n_dofs_per_cell());
-          cell->get_dof_indices(local_dof_indices);
-          constraints.distribute_local_to_global(local_matrix,
-                                                 local_rhs,
-                                                 local_dof_indices,
-                                                 system_matrix,
-                                                 system_rhs);
-          // We now assemble the pressure mass matrix.
-          std::vector<unsigned int> pressure_local_indices;
-          pressure_local_indices.reserve(cell->get_fe().n_dofs_per_cell());
-
-          for (unsigned int i = 0; i < cell->get_fe().n_dofs_per_cell(); ++i)
+          for (unsigned int q = 0; q < fe_values.n_quadrature_points; ++q)
             {
-              // Check if this DoF belongs to the pressure component (index
-              // 'dim')
-              const unsigned int component_index =
-                cell->get_fe().system_to_component_index(i).first;
-
-              if (component_index == dim) // dim is always the pressure index
+              for (unsigned int k = 0; k < dofs_per_cell; ++k)
                 {
-                  pressure_local_indices.push_back(i);
+                  stokes_symgrad_phi_u[k] =
+                    fe_values[velocities].symmetric_gradient(k, q);
+                  stokes_div_phi_u[k] = fe_values[velocities].divergence(k, q);
+                  stokes_phi_p[k]     = fe_values[pressure].value(k, q);
                 }
+
+              for (unsigned int i = 0; i < dofs_per_cell; ++i)
+                for (unsigned int j = 0; j < dofs_per_cell; ++j)
+                  local_matrix(i, j) +=
+                    (2 * viscosity * stokes_symgrad_phi_u[i] *
+                       stokes_symgrad_phi_u[j] -
+                     stokes_div_phi_u[i] * stokes_phi_p[j] -
+                     stokes_phi_p[i] * stokes_div_phi_u[j]) *
+                    fe_values.JxW(q);
             }
-
-          // Resize the small structures
-          const unsigned int n_pressure_dofs = pressure_local_indices.size();
-          FullMatrix<double> local_pressure_matrix(n_pressure_dofs,
-                                                   n_pressure_dofs);
-          std::vector<types::global_dof_index> pressure_global_dof_indices(
-            n_pressure_dofs);
-
-          // Fill the small matrix and indices
-          for (unsigned int i = 0; i < n_pressure_dofs; ++i)
-            {
-              // Get the original local index (e.g., 5) and map to global
-              const unsigned int original_i  = pressure_local_indices[i];
-              pressure_global_dof_indices[i] = dof_indices[original_i];
-
-              for (unsigned int j = 0; j < n_pressure_dofs; ++j)
-                {
-                  const unsigned int original_j = pressure_local_indices[j];
-
-                  // Compute the integral directly here
-                  // (No need to compute the full matrix first)
-                  double value = 0.0;
-                  for (unsigned int q = 0; q < fe_values.n_quadrature_points;
-                       ++q)
-                    {
-                      value += fe_values[pressure].value(original_i, q) *
-                               fe_values[pressure].value(original_j, q) /
-                               viscosity * fe_values.JxW(q);
-                    }
-                  local_pressure_matrix(i, j) = value;
-                }
-            }
-
-          // Distribute ONLY the pressure part
-          // This is safe because pressure_mass ONLY has pressure rows
-          // allocated.
-          constraints.distribute_local_to_global(local_pressure_matrix,
-                                                 pressure_global_dof_indices,
-                                                 pressure_mass);
-          // The more interesting part of this function is where
-          // we see about
-          // face terms along the interface between the two subdomains. To this
-          // end, we first have to make sure that we only assemble them once
-          // even though a loop over all faces of all cells would encounter each
-          // part of the interface twice. We arbitrarily make the decision that
-          // we will only evaluate interface terms if the current cell is part
-          // of the solid subdomain and if, consequently, a face is not at the
-          // boundary and the potential neighbor behind it is part of the fluid
-          // domain. Let's start with these conditions:
-          if (cell_is_in_solid_domain(cell))
-            for (const auto f : cell->face_indices())
-              if (cell->face(f)->at_boundary() == false)
-                {
-                  // At this point we know that the current cell is a candidate
-                  // for integration and that a neighbor behind face
-                  // <code>f</code> exists. There are now three possibilities:
-                  //
-                  // - The neighbor is at the same refinement level and has no
-                  //   children.
-                  // - The neighbor has children.
-                  // - The neighbor is coarser.
-                  //
-                  // In all three cases, we are only interested in it if it is
-                  // part of the fluid subdomain. So let us start with the first
-                  // and simplest case: if the neighbor is at the same level,
-                  // has no children, and is a fluid cell, then the two cells
-                  // share a boundary that is part of the interface along which
-                  // we want to integrate interface terms. All we have to do is
-                  // initialize two FEFaceValues object with the current face
-                  // and the face of the neighboring cell (note how we find out
-                  // which face of the neighboring cell borders on the current
-                  // cell) and pass things off to the function that evaluates
-                  // the interface terms (the third through fifth arguìments to
-                  // this function provide it with scratch arrays). The result
-                  // is then again copied into the global matrix, using a
-                  // function that knows that the DoF indices of rows and
-                  // columns of the local matrix result from different cells:
-                  if ((cell->neighbor(f)->level() == cell->level()) &&
-                      (cell->neighbor(f)->has_children() == false) &&
-                      cell_is_in_fluid_domain(cell->neighbor(f)))
-                    {
-                      elasticity_fe_face_values.reinit(cell, f);
-                      stokes_fe_face_values.reinit(
-                        cell->neighbor(f), cell->neighbor_of_neighbor(f));
-
-                      assemble_interface_term(elasticity_fe_face_values,
-                                              stokes_fe_face_values,
-                                              elasticity_phi,
-                                              stokes_symgrad_phi_u,
-                                              stokes_phi_p,
-                                              local_interface_matrix);
-
-                      cell->neighbor(f)->get_dof_indices(neighbor_dof_indices);
-                      constraints.distribute_local_to_global(
-                        local_interface_matrix,
-                        local_dof_indices,
-                        neighbor_dof_indices,
-                        system_matrix);
-                    }
-
-                  // The second case is if the neighbor has further children. In
-                  // that case, we have to loop over all the children of the
-                  // neighbor to see if they are part of the fluid subdomain. If
-                  // they are, then we integrate over the common interface,
-                  // which is a face for the neighbor and a subface of the
-                  // current cell, requiring us to use an FEFaceValues for the
-                  // neighbor and an FESubfaceValues for the current cell:
-                  else if ((cell->neighbor(f)->level() == cell->level()) &&
-                           (cell->neighbor(f)->has_children() == true))
-                    {
-                      for (unsigned int subface = 0;
-                           subface < cell->face(f)->n_children();
-                           ++subface)
-                        if (cell_is_in_fluid_domain(
-                              cell->neighbor_child_on_subface(f, subface)))
-                          {
-                            elasticity_fe_subface_values.reinit(cell,
-                                                                f,
-                                                                subface);
-                            stokes_fe_face_values.reinit(
-                              cell->neighbor_child_on_subface(f, subface),
-                              cell->neighbor_of_neighbor(f));
-
-                            assemble_interface_term(
-                              elasticity_fe_subface_values,
-                              stokes_fe_face_values,
-                              elasticity_phi,
-                              stokes_symgrad_phi_u,
-                              stokes_phi_p,
-                              local_interface_matrix);
-                            cell->neighbor_child_on_subface(f, subface)
-                              ->get_dof_indices(neighbor_dof_indices);
-                            constraints.distribute_local_to_global(
-                              local_interface_matrix,
-                              local_dof_indices,
-                              neighbor_dof_indices,
-                              system_matrix);
-                          }
-                    }
-
-                  // The last option is that the neighbor is coarser. In that
-                  // case we have to use an FESubfaceValues object for the
-                  // neighbor and a FEFaceValues for the current cell; the rest
-                  // is the same as before:
-                  else if (cell->neighbor_is_coarser(f) &&
-                           cell_is_in_fluid_domain(cell->neighbor(f)))
-                    {
-                      elasticity_fe_face_values.reinit(cell, f);
-                      stokes_fe_subface_values.reinit(
-                        cell->neighbor(f),
-                        cell->neighbor_of_coarser_neighbor(f).first,
-                        cell->neighbor_of_coarser_neighbor(f).second);
-
-                      assemble_interface_term(elasticity_fe_face_values,
-                                              stokes_fe_subface_values,
-                                              elasticity_phi,
-                                              stokes_symgrad_phi_u,
-                                              stokes_phi_p,
-                                              local_interface_matrix);
-                      cell->neighbor(f)->get_dof_indices(neighbor_dof_indices);
-                      constraints.distribute_local_to_global(
-                        local_interface_matrix,
-                        local_dof_indices,
-                        neighbor_dof_indices,
-                        system_matrix);
-                    }
-                }
         }
+#endif
+#ifdef EXACT
+      else
+        {
+          const unsigned int dofs_per_cell = cell->get_fe().n_dofs_per_cell();
+          Assert(dofs_per_cell == elasticity_dofs_per_cell, ExcInternalError());
+
+          for (unsigned int q = 0; q < fe_values.n_quadrature_points; ++q)
+            {
+              for (unsigned int k = 0; k < dofs_per_cell; ++k)
+                {
+                  elasticity_grad_phi[k] =
+                    fe_values[displacements].gradient(k, q);
+                  elasticity_div_phi[k] =
+                    fe_values[displacements].divergence(k, q);
+                }
+              Tensor<1, dim>    g_q;
+              const Point<dim> &p_q = fe_values.quadrature_point(q);
+              for (unsigned int d = 0; d < dim; ++d)
+                g_q[d] = solid_rhs.value(p_q, d + (dim + 1));
+
+              // Right-hand side contribution
+              for (unsigned int i = 0; i < dofs_per_cell; ++i)
+                {
+                  const Tensor<1, dim> phi_isol =
+                    fe_values[displacements].value(i, q);
+                  local_rhs[i] +=
+                    scalar_product(g_q, phi_isol) * fe_values.JxW(q);
+                }
+
+              for (unsigned int i = 0; i < dofs_per_cell; ++i)
+                for (unsigned int j = 0; j < dofs_per_cell; ++j)
+                  {
+                    local_matrix(i, j) +=
+                      (lambda * elasticity_div_phi[i] * elasticity_div_phi[j] +
+                       mu * scalar_product(elasticity_grad_phi[i],
+                                           elasticity_grad_phi[j]) +
+                       mu * scalar_product(elasticity_grad_phi[i],
+                                           transpose(elasticity_grad_phi[j]))) *
+                      fe_values.JxW(q);
+                  }
+            }
+        }
+
+#else
+      else
+        {
+          const unsigned int dofs_per_cell = cell->get_fe().n_dofs_per_cell();
+          Assert(dofs_per_cell == elasticity_dofs_per_cell, ExcInternalError());
+
+          for (unsigned int q = 0; q < fe_values.n_quadrature_points; ++q)
+            {
+              for (unsigned int k = 0; k < dofs_per_cell; ++k)
+                {
+                  elasticity_grad_phi[k] =
+                    fe_values[displacements].gradient(k, q);
+                  elasticity_div_phi[k] =
+                    fe_values[displacements].divergence(k, q);
+                }
+
+              for (unsigned int i = 0; i < dofs_per_cell; ++i)
+                for (unsigned int j = 0; j < dofs_per_cell; ++j)
+                  {
+                    local_matrix(i, j) +=
+                      (lambda * elasticity_div_phi[i] * elasticity_div_phi[j] +
+                       mu * scalar_product(elasticity_grad_phi[i],
+                                           elasticity_grad_phi[j]) +
+                       mu * scalar_product(elasticity_grad_phi[i],
+                                           transpose(elasticity_grad_phi[j]))) *
+                      fe_values.JxW(q);
+                  }
+            }
+        }
+#endif
+      // Once we have the contributions from cell integrals, we copy them
+      // into the global matrix (taking care of constraints right away,
+      // through the AffineConstraints::distribute_local_to_global
+      // function). Note that we have not written anything into the
+      // <code>local_rhs</code> variable, though we still need to pass it
+      // along since the elimination of nonzero boundary values requires the
+      // modification of local and consequently also global right hand side
+      // values:
+      local_dof_indices.resize(cell->get_fe().n_dofs_per_cell());
+      cell->get_dof_indices(local_dof_indices);
+      constraints.distribute_local_to_global(
+        local_matrix, local_rhs, local_dof_indices, system_matrix, system_rhs);
+      // We now assemble the pressure mass matrix.
+      std::vector<unsigned int> pressure_local_indices;
+      pressure_local_indices.reserve(cell->get_fe().n_dofs_per_cell());
+
+      for (unsigned int i = 0; i < cell->get_fe().n_dofs_per_cell(); ++i)
+        {
+          // Check if this DoF belongs to the pressure component (index
+          // 'dim')
+          const unsigned int component_index =
+            cell->get_fe().system_to_component_index(i).first;
+
+          if (component_index == dim) // dim is always the pressure index
+            {
+              pressure_local_indices.push_back(i);
+            }
+        }
+
+      // Resize the small structures
+      const unsigned int n_pressure_dofs = pressure_local_indices.size();
+      FullMatrix<double> local_pressure_matrix(n_pressure_dofs,
+                                               n_pressure_dofs);
+      std::vector<types::global_dof_index> pressure_global_dof_indices(
+        n_pressure_dofs);
+
+      // Fill the small matrix and indices
+      for (unsigned int i = 0; i < n_pressure_dofs; ++i)
+        {
+          // Get the original local index (e.g., 5) and map to global
+          const unsigned int original_i  = pressure_local_indices[i];
+          pressure_global_dof_indices[i] = dof_indices[original_i];
+
+          for (unsigned int j = 0; j < n_pressure_dofs; ++j)
+            {
+              const unsigned int original_j = pressure_local_indices[j];
+
+              // Compute the integral directly here
+              // (No need to compute the full matrix first)
+              double value = 0.0;
+              for (unsigned int q = 0; q < fe_values.n_quadrature_points; ++q)
+                {
+                  value += fe_values[pressure].value(original_i, q) *
+                           fe_values[pressure].value(original_j, q) /
+                           viscosity * fe_values.JxW(q);
+                }
+              local_pressure_matrix(i, j) = value;
+            }
+        }
+
+      // Distribute ONLY the pressure part
+      // This is safe because pressure_mass ONLY has pressure rows
+      // allocated.
+      constraints.distribute_local_to_global(local_pressure_matrix,
+                                             pressure_global_dof_indices,
+                                             pressure_mass);
+      // The more interesting part of this function is where
+      // we see about
+      // face terms along the interface between the two subdomains. To this
+      // end, we first have to make sure that we only assemble them once
+      // even though a loop over all faces of all cells would encounter each
+      // part of the interface twice. We arbitrarily make the decision that
+      // we will only evaluate interface terms if the current cell is part
+      // of the solid subdomain and if, consequently, a face is not at the
+      // boundary and the potential neighbor behind it is part of the fluid
+      // domain. Let's start with these conditions:
+      if (cell_is_in_solid_domain(cell))
+        for (const auto f : cell->face_indices())
+          if (cell->face(f)->at_boundary() == false)
+            {
+              // At this point we know that the current cell is a candidate
+              // for integration and that a neighbor behind face
+              // <code>f</code> exists. There are now three possibilities:
+              //
+              // - The neighbor is at the same refinement level and has no
+              //   children.
+              // - The neighbor has children.
+              // - The neighbor is coarser.
+              //
+              // In all three cases, we are only interested in it if it is
+              // part of the fluid subdomain. So let us start with the first
+              // and simplest case: if the neighbor is at the same level,
+              // has no children, and is a fluid cell, then the two cells
+              // share a boundary that is part of the interface along which
+              // we want to integrate interface terms. All we have to do is
+              // initialize two FEFaceValues object with the current face
+              // and the face of the neighboring cell (note how we find out
+              // which face of the neighboring cell borders on the current
+              // cell) and pass things off to the function that evaluates
+              // the interface terms (the third through fifth arguìments to
+              // this function provide it with scratch arrays). The result
+              // is then again copied into the global matrix, using a
+              // function that knows that the DoF indices of rows and
+              // columns of the local matrix result from different cells:
+              if ((cell->neighbor(f)->level() == cell->level()) &&
+                  (cell->neighbor(f)->has_children() == false) &&
+                  cell_is_in_fluid_domain(cell->neighbor(f)))
+                {
+                  elasticity_fe_face_values.reinit(cell, f);
+                  stokes_fe_face_values.reinit(cell->neighbor(f),
+                                               cell->neighbor_of_neighbor(f));
+
+                  assemble_interface_term(elasticity_fe_face_values,
+                                          stokes_fe_face_values,
+                                          elasticity_phi,
+                                          stokes_symgrad_phi_u,
+                                          stokes_phi_p,
+                                          local_interface_matrix);
+
+                  cell->neighbor(f)->get_dof_indices(neighbor_dof_indices);
+                  constraints.distribute_local_to_global(local_interface_matrix,
+                                                         local_dof_indices,
+                                                         neighbor_dof_indices,
+                                                         system_matrix);
+                }
+
+              // The second case is if the neighbor has further children. In
+              // that case, we have to loop over all the children of the
+              // neighbor to see if they are part of the fluid subdomain. If
+              // they are, then we integrate over the common interface,
+              // which is a face for the neighbor and a subface of the
+              // current cell, requiring us to use an FEFaceValues for the
+              // neighbor and an FESubfaceValues for the current cell:
+              else if ((cell->neighbor(f)->level() == cell->level()) &&
+                       (cell->neighbor(f)->has_children() == true))
+                {
+                  for (unsigned int subface = 0;
+                       subface < cell->face(f)->n_children();
+                       ++subface)
+                    if (cell_is_in_fluid_domain(
+                          cell->neighbor_child_on_subface(f, subface)))
+                      {
+                        elasticity_fe_subface_values.reinit(cell, f, subface);
+                        stokes_fe_face_values.reinit(
+                          cell->neighbor_child_on_subface(f, subface),
+                          cell->neighbor_of_neighbor(f));
+
+                        assemble_interface_term(elasticity_fe_subface_values,
+                                                stokes_fe_face_values,
+                                                elasticity_phi,
+                                                stokes_symgrad_phi_u,
+                                                stokes_phi_p,
+                                                local_interface_matrix);
+                        cell->neighbor_child_on_subface(f, subface)
+                          ->get_dof_indices(neighbor_dof_indices);
+                        constraints.distribute_local_to_global(
+                          local_interface_matrix,
+                          local_dof_indices,
+                          neighbor_dof_indices,
+                          system_matrix);
+                      }
+                }
+
+              // The last option is that the neighbor is coarser. In that
+              // case we have to use an FESubfaceValues object for the
+              // neighbor and a FEFaceValues for the current cell; the rest
+              // is the same as before:
+              else if (cell->neighbor_is_coarser(f) &&
+                       cell_is_in_fluid_domain(cell->neighbor(f)))
+                {
+                  elasticity_fe_face_values.reinit(cell, f);
+                  stokes_fe_subface_values.reinit(
+                    cell->neighbor(f),
+                    cell->neighbor_of_coarser_neighbor(f).first,
+                    cell->neighbor_of_coarser_neighbor(f).second);
+
+                  assemble_interface_term(elasticity_fe_face_values,
+                                          stokes_fe_subface_values,
+                                          elasticity_phi,
+                                          stokes_symgrad_phi_u,
+                                          stokes_phi_p,
+                                          local_interface_matrix);
+                  cell->neighbor(f)->get_dof_indices(neighbor_dof_indices);
+                  constraints.distribute_local_to_global(local_interface_matrix,
+                                                         local_dof_indices,
+                                                         neighbor_dof_indices,
+                                                         system_matrix);
+                }
+            }
+    }
 
   system_matrix.compress(VectorOperation::add);
   system_rhs.compress(VectorOperation::add);
@@ -1110,7 +1166,8 @@ FluidStructureProblem::assemble_preconditioners()
   const FEValuesExtractors::Vector velocity_components(0);
   std::vector<std::vector<bool>>   stokes_constant_modes;
   DoFTools::extract_constant_modes(dof_handler,
-                                   fe_collection.component_mask(velocity_components),
+                                   fe_collection.component_mask(
+                                     velocity_components),
                                    stokes_constant_modes);
   TrilinosWrappers::PreconditionAMG::AdditionalData stokes_amg_data;
   stokes_amg_data.constant_modes = stokes_constant_modes;
@@ -1128,7 +1185,8 @@ FluidStructureProblem::assemble_preconditioners()
   const FEValuesExtractors::Vector elasticity_components(dim + 1);
   std::vector<std::vector<bool>>   elasticity_constant_modes;
   DoFTools::extract_constant_modes(dof_handler,
-                                   fe_collection.component_mask(elasticity_components),
+                                   fe_collection.component_mask(
+                                     elasticity_components),
                                    elasticity_constant_modes);
   TrilinosWrappers::PreconditionAMG::AdditionalData elasticity_amg_data;
   elasticity_amg_data.constant_modes = elasticity_constant_modes;
@@ -1213,7 +1271,7 @@ FluidStructureProblem::solve_iterative()
   SolverControl solver_control(100000, 1e-16 * system_rhs.l2_norm());
 #  ifdef FORCE_USE_OF_TRILINOS
 
-#ifndef DEBUG
+#    ifndef DEBUG
   PreconditionBlockTriangularAMG preconditioner;
   preconditioner.initialize(system_matrix.block(0, 0),
                             pressure_mass.block(1, 1),
@@ -1224,7 +1282,7 @@ FluidStructureProblem::solve_iterative()
                             stokes_preconditioner,
                             mp_preconditioner,
                             elasticity_preconditioner);
-#else
+#    else
   PreconditionBlockTriangular preconditioner;
   preconditioner.initialize(system_matrix.block(0, 0),
                             pressure_mass.block(1, 1),
@@ -1232,7 +1290,7 @@ FluidStructureProblem::solve_iterative()
                             system_matrix.block(2, 0),
                             system_matrix.block(2, 1),
                             system_matrix.block(2, 2));
-#endif
+#    endif
   SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
   solver.solve(system_matrix,
                completely_distributed_solution,
@@ -1304,34 +1362,8 @@ FluidStructureProblem::output_results(const unsigned int refinement_cycle) const
                            "material_id",
                            DataOut<dim>::type_cell_data);
 #ifdef EXACT
-  const QGauss<dim> stokes_quadrature(stokes_degree + 2);
-  const QGauss<dim> elasticity_quadrature(elasticity_degree + 2);
-
-  hp::QCollection<dim> q_collection;
-  q_collection.push_back(stokes_quadrature);
-  q_collection.push_back(elasticity_quadrature);
-  Vector<double> error_per_cell(triangulation.n_active_cells());
-
-  // const FEValuesExtractors::Vector velocities(0);
-  ComponentSelectFunction<dim> components(std::make_pair(0, dim),
-                                          dim + 1 + dim);
-  // std::cout << ExactSolution_onlyu::n_components() << "and"
-  // stokes_fe.n_components() << std::nedl
-
-  VectorTools::integrate_difference(dof_handler,
-                                    locally_relevant_solution,
-                                    ExactSolution_onlyu(),
-                                    error_per_cell,
-                                    q_collection,
-                                    VectorTools::L2_norm,
-                                    &components);
-  data_out.add_data_vector(error_per_cell,
-                           "error",
-                           DataOut<dim>::type_cell_data
-                           );
-
   ExactSolution_FSI<dim> exact_solution;
-  Vector<double> exact(locally_relevant_solution.size());
+  Vector<double>         exact(locally_relevant_solution.size());
 
   VectorTools::interpolate(dof_handler, exact_solution, exact);
 
@@ -1339,16 +1371,6 @@ FluidStructureProblem::output_results(const unsigned int refinement_cycle) const
                            "ex",
                            DataOut<dim>::type_dof_data,
                            data_component_interpretation);
-  Vector<double> compo(locally_relevant_solution.size());
-
-  VectorTools::interpolate(dof_handler, components, compo);
-
-
-  data_out.add_data_vector(compo,
-                           "components",
-                           DataOut<dim>::type_dof_data,
-                           data_component_interpretation);
-
 #endif
   data_out.build_patches();
 
@@ -1368,7 +1390,10 @@ void
 FluidStructureProblem::refine_mesh(const unsigned int n_cycle)
 {
   TimerOutput::Scope t(timer, "refining");
-
+#ifdef EXACT_TABLE
+  triangulation.refine_global(1);
+  return;
+#endif
   pcout << "   Refining mesh, cycle number " << n_cycle << std::endl;
 
   Vector<float> stokes_estimated_error_per_cell(triangulation.n_active_cells());
@@ -1497,7 +1522,7 @@ FluidStructureProblem::refine_mesh(const unsigned int n_cycle)
         << std::endl;
 }
 
-void
+double
 FluidStructureProblem::compute_velocity_error(
   const VectorTools::NormType &norm_type) const
 {
@@ -1509,100 +1534,176 @@ FluidStructureProblem::compute_velocity_error(
   q_collection.push_back(elasticity_quadrature);
   Vector<double> error_per_cell(triangulation.n_active_cells());
 
-  // const FEValuesExtractors::Vector velocities(0);
   ComponentSelectFunction<dim> components(std::make_pair(0, dim),
                                           dim + 1 + dim);
-                                          
-  // std::cout << ExactSolution_onlyu::n_components() << "and"
-  // stokes_fe.n_components() << std::endl;
 
   VectorTools::integrate_difference(dof_handler,
                                     locally_relevant_solution,
                                     ExactSolution_onlyu(),
                                     error_per_cell,
                                     q_collection,
-                                    VectorTools::L2_norm,
+                                    norm_type,
                                     &components);
 
   for (const auto &cell : dof_handler.active_cell_iterators())
-  {
-    if (cell->material_id() != fluid_domain_id)
-      error_per_cell[cell->active_cell_index()] = 0.0;
-  }                                  
+    {
+      if (cell->material_id() != fluid_domain_id)
+        error_per_cell[cell->active_cell_index()] = 0.0;
+    }
 
 
-  std::cout << "Computed velocity error." << std::endl;
 
   double velocity_error =
-    VectorTools::compute_global_error(triangulation,
-                                      error_per_cell,
-                                      VectorTools::L2_norm);
-  std::cout << "L2 velocity error: " << velocity_error << std::endl;
+    VectorTools::compute_global_error(triangulation, error_per_cell, norm_type);
+#ifndef EXACT_TABLE
+  std::cout << "Computed velocity error" << std::endl;
+
+  std::cout << "velocity error: " << velocity_error << std::endl;
+#endif
+  return velocity_error;
+}
+
+double
+FluidStructureProblem::compute_pressure_error(
+  const VectorTools::NormType &norm_type) const
+{
+  const QGauss<dim> stokes_quadrature(stokes_degree + 2);
+  const QGauss<dim> elasticity_quadrature(elasticity_degree + 2);
+
+  hp::QCollection<dim> q_collection;
+  q_collection.push_back(stokes_quadrature);
+  q_collection.push_back(elasticity_quadrature);
+  Vector<double> error_per_cell(triangulation.n_active_cells());
+
+  ComponentSelectFunction<dim> components(std::make_pair(dim, dim + 1),
+                                          dim + 1 + dim);
+
+  VectorTools::integrate_difference(dof_handler,
+                                    locally_relevant_solution,
+                                    ExactSolution_p(),
+                                    error_per_cell,
+                                    q_collection,
+                                    norm_type,
+                                    &components);
+
+  for (const auto &cell : dof_handler.active_cell_iterators())
+    {
+      if (cell->material_id() != fluid_domain_id)
+        error_per_cell[cell->active_cell_index()] = 0.0;
+    }
+  double pressure_error =
+    VectorTools::compute_global_error(triangulation, error_per_cell, norm_type);
+
+#ifndef EXACT_TABLE
+  std::cout << "Computed pressure error" << std::endl;
+
+  std::cout << "pressure error: " << pressure_error << std::endl;
+#endif
+  return pressure_error;
 }
 
 
-// void
-// FluidStructureProblem::compute_velocity_error(
-//   const VectorTools::NormType &norm_type) const
-// {
-//   // 1. Setup Quadrature and FEValues
-//   QGauss<dim>   quadrature_formula(stokes_fe.degree + 2);
-//   FEValues<dim> fe_values(stokes_fe,
-//                           quadrature_formula,
-//                           update_values | update_quadrature_points |
-//                             update_JxW_values);
+double
+FluidStructureProblem::compute_displacement_error(
+  const VectorTools::NormType &norm_type) const
+{
+  const QGauss<dim> stokes_quadrature(stokes_degree + 2);
+  const QGauss<dim> elasticity_quadrature(elasticity_degree + 2);
 
-//   const unsigned int n_q_points = quadrature_formula.size();
+  hp::QCollection<dim> q_collection;
+  q_collection.push_back(stokes_quadrature);
+  q_collection.push_back(elasticity_quadrature);
+  Vector<double> error_per_cell(triangulation.n_active_cells());
 
-//   // 2. Define the exact solution function
-//   ExactSolution_onlyu exact_solution_function;
+  ComponentSelectFunction<dim> components(std::make_pair(dim + 1,
+                                                         dim + 1 + dim),
+                                          dim + 1 + dim);
 
-//   // 3. Define the extractor for velocity (assuming it starts at component 0)
-//   const FEValuesExtractors::Vector velocities(0);
+  VectorTools::integrate_difference(dof_handler,
+                                    locally_relevant_solution,
+                                    ExactSolution_d(),
+                                    error_per_cell,
+                                    q_collection,
+                                    norm_type,
+                                    &components);
 
-//   // Storage for values on quadrature points
-//   std::vector<Tensor<1, dim>> approx_velocity_values(n_q_points);
-//   std::vector<Tensor<1, dim>> exact_velocity_values(n_q_points);
+  for (const auto &cell : dof_handler.active_cell_iterators())
+    {
+      if (cell->material_id() != solid_domain_id)
+        error_per_cell[cell->active_cell_index()] = 0.0;
+    }
 
-//   double local_error_sq_sum = 0.0;
 
-//   // Define the material ID for the fluid (adjust based on your mesh setup)
-//   const unsigned int fluid_material_id = 0;
 
-//   // 4. Iterate over active cells
-//   for (const auto &cell : dof_handler.active_cell_iterators())
-//     {
-//       // FILTER: Only compute on Fluid cells
-//       if (cell->material_id() == fluid_material_id)
-//         {
-//           fe_values.reinit(cell);
+  double displacement_error =
+    VectorTools::compute_global_error(triangulation, error_per_cell, norm_type);
+#ifndef EXACT_TABLE
+  std::cout << "Computed displacement error" << std::endl;
+  std::cout << "displacement error: " << displacement_error << std::endl;
+#endif
+  return displacement_error;
+}
 
-//           // Extract ONLY the velocity part of the FE solution
-//           fe_values[velocities].get_function_values(locally_relevant_solution,
-//                                                     approx_velocity_values);
+void
+FluidStructureProblem::compute_error(const unsigned int refinement_cycle)
+{
+  const double h = 1.0 / (problemsize * std::pow(2, refinement_cycle));
+#ifndef EXACT_TABLE
+  pcout << "L2_norm:" << std::endl;
+#endif
+  double L2_error_velocity = compute_velocity_error(VectorTools::L2_norm);
+  double L2_error_pressure = compute_pressure_error(VectorTools::L2_norm);
+  double L2_error_displacement =
+    compute_displacement_error(VectorTools::L2_norm);
+#ifndef EXACT_TABLE
+  pcout << "H1_norm:" << std::endl;
+#endif
+  double H1_error_velocity = compute_velocity_error(VectorTools::H1_norm);
+  double H1_error_pressure = compute_pressure_error(VectorTools::H1_norm);
+  double H1_error_displacement =
+    compute_displacement_error(VectorTools::H1_norm);
+#ifdef EXACT_TABLE
+  velocity_convergence_table.add_value("h", h);
+  velocity_convergence_table.add_value("L2", L2_error_velocity);
+  velocity_convergence_table.add_value("H1", H1_error_velocity);
+  pressure_convergence_table.add_value("h", h);
+  pressure_convergence_table.add_value("L2", L2_error_pressure);
+  pressure_convergence_table.add_value("H1", H1_error_pressure);
+  displacement_convergence_table.add_value("h", h);
+  displacement_convergence_table.add_value("L2", L2_error_displacement);
+  displacement_convergence_table.add_value("H1", H1_error_displacement);
+#endif
+}
 
-//           // Get the exact solution at the quadrature points
-//           // (Ensure your ExactSolution class can handle point evaluation)
-//           exact_solution_function.value_list(fe_values.get_quadrature_points(),
-//                                              exact_velocity_values);
 
-//           // Integrate the error
-//           for (unsigned int q = 0; q < n_q_points; ++q)
-//             {
-//               const Tensor<1, dim> diff =
-//                 approx_velocity_values[q] - exact_velocity_values[q];
+void
+FluidStructureProblem::output_table()
+{
+#ifdef EXACT_TABLE
+  pcout << "Velocity" << std::endl;
+  velocity_convergence_table.evaluate_all_convergence_rates(
+    ConvergenceTable::reduction_rate_log2);
 
-//               // L2 Norm: integral of |u - u_exact|^2
-//               local_error_sq_sum += (diff * diff) * fe_values.JxW(q);
-//             }
-//         }
-//     }
+  velocity_convergence_table.set_scientific("L2", true);
+  velocity_convergence_table.set_scientific("H1", true);
 
-//   // 5. Aggregate across processors (if running in parallel)
-//   const double global_error_sq_sum =
-//     Utilities::MPI::sum(local_error_sq_sum, MPI_COMM_WORLD);
+  velocity_convergence_table.write_text(std::cout);
+  pcout << "Pressure" << std::endl;
 
-//   const double L2_error = std::sqrt(global_error_sq_sum);
+  pressure_convergence_table.evaluate_all_convergence_rates(
+    ConvergenceTable::reduction_rate_log2);
 
-//   std::cout << "L2 velocity error (Fluid only): " << L2_error << std::endl;
-// }
+  pressure_convergence_table.set_scientific("L2", true);
+  pressure_convergence_table.set_scientific("H1", true);
+  pressure_convergence_table.write_text(std::cout);
+  pcout << "Displacement" << std::endl;
+
+  displacement_convergence_table.evaluate_all_convergence_rates(
+    ConvergenceTable::reduction_rate_log2);
+
+  displacement_convergence_table.set_scientific("L2", true);
+  displacement_convergence_table.set_scientific("H1", true);
+
+  displacement_convergence_table.write_text(std::cout);
+#endif
+}
