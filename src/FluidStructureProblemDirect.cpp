@@ -22,13 +22,13 @@ FluidStructureProblem::make_grid()
       else
         cell->set_material_id(solid_domain_id);
     }
-  pcout << "Mesh generated!" << std::endl;
+  // pcout << "Mesh generated!" << std::endl;
 }
 
 void
 FluidStructureProblem::set_active_fe_indices()
 {
-  pcout << "Setting active fe indeces.." << std::endl;
+  // pcout << "Setting active fe indeces.." << std::endl;
   for (const auto &cell : dof_handler.active_cell_iterators())
     {
       if (!cell->is_locally_owned())
@@ -40,7 +40,7 @@ FluidStructureProblem::set_active_fe_indices()
       else
         Assert(false, ExcNotImplemented());
     }
-  pcout << "Done!" << std::endl;
+  // pcout << "Done!" << std::endl;
 }
 
 void
@@ -55,11 +55,11 @@ FluidStructureProblem::setup_dofs()
                                    locally_relevant_dofs,
                                    MPI_COMM_WORLD);
   system_rhs.reinit(locally_owned_dofs, MPI_COMM_WORLD);
-  pcout << "Locally owned" << std::endl;
-  std::cout << locally_relevant_dofs.n_elements() << " locally relevant dofs."
-            << mpi_rank << std::endl;
-  std::cout << locally_owned_dofs.n_elements() << " locally owned dofs."
-            << mpi_rank << std::endl;
+  // pcout << "Locally owned" << std::endl;
+  // std::cout << locally_relevant_dofs.n_elements() << " locally relevant dofs."
+  //           << mpi_rank << std::endl;
+  // std::cout << locally_owned_dofs.n_elements() << " locally owned dofs."
+  //           << mpi_rank << std::endl;
 
 
   constraints.clear();
@@ -493,7 +493,7 @@ FluidStructureProblem::assemble_interface_term(
   std::vector<double>                  &stokes_phi_p,
   FullMatrix<double>                   &local_interface_matrix) const
 {
-  pcout << "Assembling interface term..." << std::endl;
+  // pcout << "Assembling interface term..." << std::endl;
   Assert(stokes_fe_face_values.n_quadrature_points ==
            elasticity_fe_face_values.n_quadrature_points,
          ExcInternalError());
@@ -527,13 +527,13 @@ FluidStructureProblem::assemble_interface_term(
                stokes_phi_p[j] * normal_vector) *
               elasticity_phi[i] * stokes_fe_face_values.JxW(q));
     }
-  pcout << "Assembly of interface term done!" << std::endl;
+  // pcout << "Assembly of interface term done!" << std::endl;
 }
 
 void
 FluidStructureProblem::solve()
 {
-  pcout << "solvingthissutff" << std::endl;
+  // pcout << "solvingthissutff" << std::endl;
   LA::MPI::Vector completely_distributed_solution(locally_owned_dofs,
                                                   MPI_COMM_WORLD);
 #ifdef FORCE_USE_OF_TRILINOS
@@ -554,7 +554,7 @@ FluidStructureProblem::solve()
 void
 FluidStructureProblem::output_results(const unsigned int refinement_cycle) const
 {
-  std::cout << "Writing output..." << std::endl;
+  // std::cout << "Writing output..." << std::endl;
   std::vector<std::string> solution_names(dim, "velocity");
   solution_names.emplace_back("pressure");
   for (unsigned int d = 0; d < dim; ++d)
