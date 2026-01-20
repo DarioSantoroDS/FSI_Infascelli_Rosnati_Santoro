@@ -1163,38 +1163,70 @@ FluidStructureProblem::assemble_preconditioners()
 
   pcout << "   Building preconditioners..." << std::endl;
   stokes_preconditioner = std::make_shared<TrilinosWrappers::PreconditionAMG>();
+  TrilinosWrappers::PreconditionAMG::AdditionalData stokes_amg_data;
+  stokes_amg_data.elliptic              = true;
+  stokes_amg_data.higher_order_elements = true;
+  stokes_amg_data.smoother_sweeps       = 2;
+  stokes_amg_data.aggregation_threshold = 0.02;
+
+  mp_preconditioner = std::make_shared<TrilinosWrappers::PreconditionAMG>();
+
+  elasticity_preconditioner =
+    std::make_shared<TrilinosWrappers::PreconditionAMG>();
+  TrilinosWrappers::PreconditionAMG::AdditionalData elasticity_amg_data;
+  elasticity_amg_data.elliptic = true;
+  if (elasticity_degree >= 2)
+    elasticity_amg_data.higher_order_elements = true;
+  else
+    elasticity_amg_data.higher_order_elements = false;
+  elasticity_amg_data.smoother_sweeps       = 2;
+  elasticity_amg_data.aggregation_threshold = 0.02;
+#ifdef USE_CONSTANT_MODES
   const FEValuesExtractors::Vector velocity_components(0);
   std::vector<std::vector<bool>>   stokes_constant_modes;
   DoFTools::extract_constant_modes(dof_handler,
                                    fe_collection.component_mask(
                                      velocity_components),
                                    stokes_constant_modes);
-  TrilinosWrappers::PreconditionAMG::AdditionalData stokes_amg_data;
   stokes_amg_data.constant_modes = stokes_constant_modes;
-
-  stokes_amg_data.elliptic              = true;
-  stokes_amg_data.higher_order_elements = true;
-  stokes_amg_data.smoother_sweeps       = 2;
-  stokes_amg_data.aggregation_threshold = 0.02;
-  stokes_preconditioner->initialize(system_matrix.block(0, 0), stokes_amg_data);
-  mp_preconditioner = std::make_shared<TrilinosWrappers::PreconditionAMG>();
-  mp_preconditioner->initialize(pressure_mass.block(1, 1));
-
-  elasticity_preconditioner =
-    std::make_shared<TrilinosWrappers::PreconditionAMG>();
   const FEValuesExtractors::Vector elasticity_components(dim + 1);
   std::vector<std::vector<bool>>   elasticity_constant_modes;
   DoFTools::extract_constant_modes(dof_handler,
                                    fe_collection.component_mask(
                                      elasticity_components),
                                    elasticity_constant_modes);
-  TrilinosWrappers::PreconditionAMG::AdditionalData elasticity_amg_data;
   elasticity_amg_data.constant_modes = elasticity_constant_modes;
+#  ifdef VERBOSE
+  std::cout << elasticity_constant_modes.size()
+            << " constant modes for elasticity preconditioner" << std::endl;
+  for (unsigned int i = 0; i < elasticity_constant_modes.size(); ++i)
+    {
+      std::cout << elasticity_constant_modes[i].size() << " DoFs per mode"
+                << std::endl;
+      unsigned int count = 0;
+      for (unsigned int j = 0; j < elasticity_constant_modes[i].size(); ++j)
+        if (elasticity_constant_modes[i][j])
+          count++;
+      std::cout << count << " constant modes detected" << std::endl;
+    }
 
-  elasticity_amg_data.elliptic              = true;
-  elasticity_amg_data.higher_order_elements = true;
-  elasticity_amg_data.smoother_sweeps       = 2;
-  elasticity_amg_data.aggregation_threshold = 0.02;
+  std::cout << stokes_constant_modes.size()
+            << " constant modes for stokes preconditioner" << std::endl;
+  for (unsigned int i = 0; i < stokes_constant_modes.size(); ++i)
+    {
+      std::cout << stokes_constant_modes[i].size() << " DoFs per mode"
+                << std::endl;
+      unsigned int count = 0;
+      for (unsigned int j = 0; j < stokes_constant_modes[i].size(); ++j)
+        if (stokes_constant_modes[i][j])
+          count++;
+      std::cout << count << " constant modes detected" << std::endl;
+    }
+#  endif
+#endif
+
+  stokes_preconditioner->initialize(system_matrix.block(0, 0), stokes_amg_data);
+  mp_preconditioner->initialize(pressure_mass.block(1, 1));
   elasticity_preconditioner->initialize(system_matrix.block(2, 2),
                                         elasticity_amg_data);
 #ifdef VERBOSE
@@ -1268,10 +1300,15 @@ FluidStructureProblem::solve_iterative()
   LA::MPI::BlockVector completely_distributed_solution(block_owned_dofs,
                                                        MPI_COMM_WORLD);
   // completely_distributed_solution = 1.0;
+#  ifdef EXACT
   SolverControl solver_control(100000, 1e-16 * system_rhs.l2_norm());
+#  else
+  SolverControl solver_control(100000, 1e-6 * system_rhs.l2_norm());
+#  endif
+
 #  ifdef FORCE_USE_OF_TRILINOS
 
-#    ifndef DEBUG
+  // #    ifndef DEBUG
   PreconditionBlockTriangularAMG preconditioner;
   preconditioner.initialize(system_matrix.block(0, 0),
                             pressure_mass.block(1, 1),
@@ -1282,15 +1319,15 @@ FluidStructureProblem::solve_iterative()
                             stokes_preconditioner,
                             mp_preconditioner,
                             elasticity_preconditioner);
-#    else
-  PreconditionBlockTriangular preconditioner;
-  preconditioner.initialize(system_matrix.block(0, 0),
-                            pressure_mass.block(1, 1),
-                            system_matrix.block(1, 0),
-                            system_matrix.block(2, 0),
-                            system_matrix.block(2, 1),
-                            system_matrix.block(2, 2));
-#    endif
+  // #    else
+  //   PreconditionBlockTriangular preconditioner;
+  //   preconditioner.initialize(system_matrix.block(0, 0),
+  //                             pressure_mass.block(1, 1),
+  //                             system_matrix.block(1, 0),
+  //                             system_matrix.block(2, 0),
+  //                             system_matrix.block(2, 1),
+  //                             system_matrix.block(2, 2));
+  // #    endif
   SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
   solver.solve(system_matrix,
                completely_distributed_solution,

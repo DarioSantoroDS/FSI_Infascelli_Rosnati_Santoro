@@ -33,9 +33,7 @@ main(int argc, char *argv[])
         flow_problem.refine_mesh(refinement_cycle);
       flow_problem.setup_dofs();
       flow_problem.assemble_system();
-#ifndef DEBUG
       flow_problem.assemble_preconditioners();
-#endif
 #ifdef DEBUG
       flow_problem.output_matrix(); // output matrix not anymore implemented, we used it to debug when PETSc was implemented and
                                     // we could output the matrix to check it on matlab

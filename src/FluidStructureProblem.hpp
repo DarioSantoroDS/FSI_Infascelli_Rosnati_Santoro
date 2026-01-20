@@ -64,9 +64,9 @@
 #define ITERATIVE_SOLVER
 // #define DIRECT_SOLVER
 // #define VERBOSE  //define to have more output
-#define EXACT
-#define EXACT_TABLE
-
+// #define EXACT
+// #define EXACT_TABLE
+#define USE_CONSTANT_MODES
 
 // When compiled in deal.II DEBUG mode, there is a problem:
 // depending on the version an assert inside the
@@ -789,128 +789,128 @@ public:
   };
 
 
-  // Older preconditioner class for the block triangular preconditioner
-  // It can be used if DEFINE is defined, because of a problem happening
-  // inside deal.ii extract_constant_modes function when used with
-  // the fe_collection made by two different finite elements, one of which
-  // is FE_Nothing.
-  // It is less efficient than the new one implemented below,
-  // due to a problem happening with the AMG preconditioner when not correctly
-  // set up.
-  class PreconditionBlockTriangular
-  {
-  public:
-    // Initialize the preconditioner, given the velocity stiffness matrix, the
-    // pressure mass matrix.
-    void
-    initialize(
-      const LA::MPI::SparseMatrix &velocity_stiffness_, // A(0,0)
-      const LA::MPI::SparseMatrix &pressure_mass_,      // pressurematrix(1,1)
-      const LA::MPI::SparseMatrix &B_,                  // A(1,0)
-      const LA::MPI::SparseMatrix &D1_,                 // A(2,0)
-      const LA::MPI::SparseMatrix &D2_,                 // A(2,1)
-      const LA::MPI::SparseMatrix &solid_matrix_        // A(2,2)
-    )
-    {
-      velocity_stiffness = &velocity_stiffness_;
-      pressure_mass      = &pressure_mass_;
-      B                  = &B_;
-      D1                 = &D1_;
-      D2                 = &D2_;
-      solid_matrix       = &solid_matrix_;
+//   // Older preconditioner class for the block triangular preconditioner
+//   // It can be used if DEBUG is defined, because of a problem happening
+//   // inside deal.ii extract_constant_modes function when used with
+//   // the fe_collection made by two different finite elements, one of which
+//   // is FE_Nothing.
+//   // It is less efficient than the new one implemented below,
+//   // due to a problem happening with the AMG preconditioner when not correctly
+//   // set up.
+//   class PreconditionBlockTriangular
+//   {
+//   public:
+//     // Initialize the preconditioner, given the velocity stiffness matrix, the
+//     // pressure mass matrix.
+//     void
+//     initialize(
+//       const LA::MPI::SparseMatrix &velocity_stiffness_, // A(0,0)
+//       const LA::MPI::SparseMatrix &pressure_mass_,      // pressurematrix(1,1)
+//       const LA::MPI::SparseMatrix &B_,                  // A(1,0)
+//       const LA::MPI::SparseMatrix &D1_,                 // A(2,0)
+//       const LA::MPI::SparseMatrix &D2_,                 // A(2,1)
+//       const LA::MPI::SparseMatrix &solid_matrix_        // A(2,2)
+//     )
+//     {
+//       velocity_stiffness = &velocity_stiffness_;
+//       pressure_mass      = &pressure_mass_;
+//       B                  = &B_;
+//       D1                 = &D1_;
+//       D2                 = &D2_;
+//       solid_matrix       = &solid_matrix_;
 
-      preconditioner_velocity.initialize(velocity_stiffness_);
-      preconditioner_pressure.initialize(pressure_mass_);
-      preconditioner_solid.initialize(solid_matrix_);
-    }
+//       preconditioner_velocity.initialize(velocity_stiffness_);
+//       preconditioner_pressure.initialize(pressure_mass_);
+//       preconditioner_solid.initialize(solid_matrix_);
+//     }
 
-    // Application of the preconditioner.
-    void
-    vmult(TrilinosWrappers::MPI::BlockVector       &dst,
-          const TrilinosWrappers::MPI::BlockVector &src) const
-    {
-      SolverControl                           solver_control_velocity(1000,
-                                            1e-2 * src.block(0).l2_norm());
-      SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_velocity(
-        solver_control_velocity);
-      solver_cg_velocity.solve(*velocity_stiffness,
-                               dst.block(0),
-                               src.block(0),
-                               preconditioner_velocity);
-#ifdef DEBUG
-      std::cout << "  " << solver_control_velocity.last_step()
-                << " CG1 iterations" << std::endl;
-#endif
-      tmpStokes.reinit(src.block(1));
-      B->vmult(tmpStokes, dst.block(0));
-      tmpStokes.sadd(-1.0, src.block(1));
+//     // Application of the preconditioner.
+//     void
+//     vmult(TrilinosWrappers::MPI::BlockVector       &dst,
+//           const TrilinosWrappers::MPI::BlockVector &src) const
+//     {
+//       SolverControl                           solver_control_velocity(1000,
+//                                             1e-2 * src.block(0).l2_norm());
+//       SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_velocity(
+//         solver_control_velocity);
+//       solver_cg_velocity.solve(*velocity_stiffness,
+//                                dst.block(0),
+//                                src.block(0),
+//                                preconditioner_velocity);
+// // #ifdef DEBUG
+// //       std::cout << "  " << solver_control_velocity.last_step()
+// //                 << " CG1 iterations" << std::endl;
+// // #endif
+//       tmpStokes.reinit(src.block(1));
+//       B->vmult(tmpStokes, dst.block(0));
+//       tmpStokes.sadd(-1.0, src.block(1));
 
-      SolverControl solver_control_pressure(1000, 1e-2 * tmpStokes.l2_norm());
-      SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_pressure(
-        solver_control_pressure);
-      solver_cg_pressure.solve(*pressure_mass,
-                               dst.block(1),
-                               tmpStokes,
-                               preconditioner_pressure);
-#ifdef DEBUG
-      std::cout << "  " << solver_control_pressure.last_step()
-                << " CG2 iterations" << std::endl;
-#endif
+//       SolverControl solver_control_pressure(1000, 1e-2 * tmpStokes.l2_norm());
+//       SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_pressure(
+//         solver_control_pressure);
+//       solver_cg_pressure.solve(*pressure_mass,
+//                                dst.block(1),
+//                                tmpStokes,
+//                                preconditioner_pressure);
+// // #ifdef DEBUG
+// //       std::cout << "  " << solver_control_pressure.last_step()
+// //                 << " CG2 iterations" << std::endl;
+// // #endif
 
-      tmpStokes.reinit(src.block(2));
-      D1->vmult(tmpStokes, dst.block(0));
-      D2->vmult_add(tmpStokes, dst.block(1));
-      tmpStokes.sadd(-1.0, src.block(2));
+//       tmpStokes.reinit(src.block(2));
+//       D1->vmult(tmpStokes, dst.block(0));
+//       D2->vmult_add(tmpStokes, dst.block(1));
+//       tmpStokes.sadd(-1.0, src.block(2));
 
 
-      // other way to do it, after testing we found it to be extremely slow.
-      // preconditioner_solid.vmult(dst.block(2), tmpStokes);
+//       // other way to do it, after testing we found it to be extremely slow.
+//       // preconditioner_solid.vmult(dst.block(2), tmpStokes);
 
-      SolverControl solver_control_solid(1000, 1e-2 * tmpStokes.l2_norm());
-      SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_solid(
-        solver_control_solid);
+//       SolverControl solver_control_solid(1000, 1e-2 * tmpStokes.l2_norm());
+//       SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_solid(
+//         solver_control_solid);
 
-      solver_cg_solid.solve(*solid_matrix,
-                            dst.block(2),
-                            tmpStokes,
-                            preconditioner_solid);
-#ifdef DEBUG
-      std::cout << "  " << solver_control_solid.last_step() << " CG3 iterations"
-                << std::endl;
-#endif
-    }
+//       solver_cg_solid.solve(*solid_matrix,
+//                             dst.block(2),
+//                             tmpStokes,
+//                             preconditioner_solid);
+// // #ifdef DEBUG
+// //       std::cout << "  " << solver_control_solid.last_step() << " CG3 iterations"
+// //                 << std::endl;
+// // #endif
+//     }
 
-  protected:
-    // Velocity stiffness matrix.
-    const LA::MPI::SparseMatrix *velocity_stiffness;
+//   protected:
+//     // Velocity stiffness matrix.
+//     const LA::MPI::SparseMatrix *velocity_stiffness;
 
-    // Preconditioner used for the velocity block.
-    TrilinosWrappers::PreconditionAMG preconditioner_velocity;
+//     // Preconditioner used for the velocity block.
+//     TrilinosWrappers::PreconditionAMG preconditioner_velocity;
 
-    // Pressure mass matrix.
-    const LA::MPI::SparseMatrix *pressure_mass;
+//     // Pressure mass matrix.
+//     const LA::MPI::SparseMatrix *pressure_mass;
 
-    // Preconditioner used for the pressure block.
-    TrilinosWrappers::PreconditionAMG preconditioner_pressure;
+//     // Preconditioner used for the pressure block.
+//     TrilinosWrappers::PreconditionAMG preconditioner_pressure;
 
-    // B matrix.
-    const LA::MPI::SparseMatrix *B;
+//     // B matrix.
+//     const LA::MPI::SparseMatrix *B;
 
-    // D1 matrix.
-    const LA::MPI::SparseMatrix *D1;
+//     // D1 matrix.
+//     const LA::MPI::SparseMatrix *D1;
 
-    // D2 matrix.
-    const LA::MPI::SparseMatrix *D2;
+//     // D2 matrix.
+//     const LA::MPI::SparseMatrix *D2;
 
-    // Preconditioner used for the pressure block.
-    TrilinosWrappers::PreconditionAMG preconditioner_solid;
+//     // Preconditioner used for the pressure block.
+//     TrilinosWrappers::PreconditionAMG preconditioner_solid;
 
-    // Solid matrix.
-    const LA::MPI::SparseMatrix *solid_matrix;
+//     // Solid matrix.
+//     const LA::MPI::SparseMatrix *solid_matrix;
 
-    // Temporary vector stokes
-    mutable LA::MPI::Vector tmpStokes;
-  };
+//     // Temporary vector stokes
+//     mutable LA::MPI::Vector tmpStokes;
+//   };
 
   // New preconditioner class for the block triangular preconditioner.
   // This one uses shared pointers for the AMG preconditioners, and is
