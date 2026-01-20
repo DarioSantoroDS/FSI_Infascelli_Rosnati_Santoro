@@ -9,11 +9,11 @@ end
 # fluid and solid weight only if the triangulation weighted partitioning is enabled
 
 subsection Refinement
-  set Refinement cycles = 4
+  set Refinement cycles = 8
 end
 
 subsection Physics
-  set Viscosity = 1.0
+  set Viscosity = 2.0
   set mu = 1.0
   set lambda = 1.0
 end
