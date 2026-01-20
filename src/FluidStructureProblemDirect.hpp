@@ -38,6 +38,7 @@
 #include <deal.II/lac/solver_gmres.h>
 #include <deal.II/lac/sparse_direct.h>
 #include <deal.II/lac/sparse_matrix.h>
+#include <deal.II/lac/sparsity_tools.h>
 #include <deal.II/lac/trilinos_block_sparse_matrix.h>
 #include <deal.II/lac/trilinos_parallel_block_vector.h>
 #include <deal.II/lac/trilinos_precondition.h>
@@ -49,7 +50,6 @@
 #include <deal.II/numerics/error_estimator.h>
 #include <deal.II/numerics/matrix_tools.h>
 #include <deal.II/numerics/vector_tools.h>
-
 // #define FORCE_USE_OF_TRILINOS
 
 #include <deal.II/lac/generic_linear_algebra.h>
