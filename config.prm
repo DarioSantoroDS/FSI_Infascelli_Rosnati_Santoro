@@ -17,3 +17,21 @@ subsection Physics
   set mu = 1.0
   set lambda = 1.0
 end
+
+subsection Stokes AMG
+  set Smoother sweeps       = 2
+  set Aggregation threshold = 1e-2
+  set Number of cycles      = 1
+  set W cycle               = false
+  set Smoother overlap      = 0
+  set Smoother type         = Chebyshev
+end
+
+subsection Elasticity AMG
+  set Smoother sweeps       = 2
+  set Aggregation threshold = 1e-2
+  set Number of cycles      = 1
+  set W cycle               = false
+  set Smoother overlap      = 0
+  set Smoother type         = Chebyshev
+end

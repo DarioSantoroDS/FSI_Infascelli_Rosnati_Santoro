@@ -52,6 +52,76 @@ ParameterReader::declare_parameters()
                       "The second Lamé parameter of the solid");
   }
   prm.leave_subsection();
+  prm.enter_subsection("Stokes AMG");
+  {
+    prm.declare_entry("Smoother sweeps",
+                      "2",
+                      Patterns::Integer(1),
+                      "Number of smoother sweeps.");
+
+    prm.declare_entry("Aggregation threshold",
+                      "1e-2",
+                      Patterns::Double(0.0),
+                      "Threshold for aggregating nodes in AMG.");
+
+    prm.declare_entry("Number of cycles",
+                      "1",
+                      Patterns::Integer(1),
+                      "Number of AMG cycles (1 means one V-cycle or W-cycle).");
+
+    prm.declare_entry("W cycle",
+                      "false",
+                      Patterns::Bool(),
+                      "Use W-cycles (true) instead of V-cycles (false).");
+
+    prm.declare_entry("Smoother overlap",
+                      "0",
+                      Patterns::Integer(0),
+                      "Overlap for the smoother application.");
+
+    prm.declare_entry(
+      "Smoother type",
+      "Chebyshev",
+      Patterns::Selection(
+        "Chebyshev|Relaxation|ILU|Jacobi|Gauss-Seidel|Symmetric Gauss-Seidel"),
+      "Type of smoother used in AMG.");
+  }
+  prm.leave_subsection();
+  prm.enter_subsection("Elasticity AMG");
+  {
+    prm.declare_entry("Smoother sweeps",
+                      "2",
+                      Patterns::Integer(1),
+                      "Number of smoother sweeps.");
+
+    prm.declare_entry("Aggregation threshold",
+                      "1e-2",
+                      Patterns::Double(0.0),
+                      "Threshold for aggregating nodes in AMG.");
+
+    prm.declare_entry("Number of cycles",
+                      "1",
+                      Patterns::Integer(1),
+                      "Number of AMG cycles (1 means one V-cycle or W-cycle).");
+
+    prm.declare_entry("W cycle",
+                      "false",
+                      Patterns::Bool(),
+                      "Use W-cycles (true) instead of V-cycles (false).");
+
+    prm.declare_entry("Smoother overlap",
+                      "0",
+                      Patterns::Integer(0),
+                      "Overlap for the smoother application.");
+
+    prm.declare_entry(
+      "Smoother type",
+      "Chebyshev",
+      Patterns::Selection(
+        "Chebyshev|Relaxation|ILU|Jacobi|Gauss-Seidel|Symmetric Gauss-Seidel"),
+      "Type of smoother used in AMG.");
+  }
+  prm.leave_subsection();
 }
 
 void
@@ -1162,15 +1232,21 @@ FluidStructureProblem::assemble_preconditioners()
   TimerOutput::Scope t(timer, "assemble_preconditioners");
 
   pcout << "   Building preconditioners..." << std::endl;
+  prm.enter_subsection("Stokes AMG");
   stokes_preconditioner = std::make_shared<TrilinosWrappers::PreconditionAMG>();
   TrilinosWrappers::PreconditionAMG::AdditionalData stokes_amg_data;
   stokes_amg_data.elliptic              = true;
   stokes_amg_data.higher_order_elements = true;
-  stokes_amg_data.smoother_sweeps       = 2;
-  stokes_amg_data.aggregation_threshold = 0.02;
-
+  stokes_amg_data.smoother_sweeps           = prm.get_integer("Smoother sweeps");
+  stokes_amg_data.aggregation_threshold = prm.get_double("Aggregation threshold");
+  stokes_amg_data.n_cycles              = prm.get_integer("Number of cycles");
+  stokes_amg_data.w_cycle               = prm.get_bool("W cycle");
+  stokes_amg_data.smoother_overlap      = prm.get_integer("Smoother overlap");
+  std::string stokes_smoother_type_str = prm.get("Smoother type");
+  stokes_amg_data.smoother_type            = stokes_smoother_type_str.c_str();
+  prm.leave_subsection(); // Leave Stokes AMG
   mp_preconditioner = std::make_shared<TrilinosWrappers::PreconditionAMG>();
-
+  prm.enter_subsection("Elasticity AMG");
   elasticity_preconditioner =
     std::make_shared<TrilinosWrappers::PreconditionAMG>();
   TrilinosWrappers::PreconditionAMG::AdditionalData elasticity_amg_data;
@@ -1179,8 +1255,15 @@ FluidStructureProblem::assemble_preconditioners()
     elasticity_amg_data.higher_order_elements = true;
   else
     elasticity_amg_data.higher_order_elements = false;
-  elasticity_amg_data.smoother_sweeps       = 2;
-  elasticity_amg_data.aggregation_threshold = 0.02;
+  elasticity_amg_data.smoother_sweeps       = prm.get_integer("Smoother sweeps");
+  elasticity_amg_data.aggregation_threshold = prm.get_double("Aggregation threshold");
+  elasticity_amg_data.n_cycles         = prm.get_integer("Number of cycles");
+  elasticity_amg_data.w_cycle          = prm.get_bool("W cycle");
+  elasticity_amg_data.smoother_overlap = prm.get_integer("Smoother overlap");
+
+  std::string elast_smoother_type_str = prm.get("Smoother type");
+  elasticity_amg_data.smoother_type       = elast_smoother_type_str.c_str();
+  prm.leave_subsection(); // Leave Elasticity AMG
 #ifdef USE_CONSTANT_MODES
   const FEValuesExtractors::Vector velocity_components(0);
   std::vector<std::vector<bool>>   stokes_constant_modes;
@@ -1734,3 +1817,5 @@ FluidStructureProblem::output_table()
   displacement_convergence_table.write_text(std::cout);
 #endif
 }
+
+
