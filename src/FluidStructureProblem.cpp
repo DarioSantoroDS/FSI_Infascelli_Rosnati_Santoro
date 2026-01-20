@@ -1308,7 +1308,6 @@ FluidStructureProblem::solve_iterative()
 
 #  ifdef FORCE_USE_OF_TRILINOS
 
-  // #    ifndef DEBUG
   PreconditionBlockTriangularAMG preconditioner;
   preconditioner.initialize(system_matrix.block(0, 0),
                             pressure_mass.block(1, 1),
@@ -1319,15 +1318,6 @@ FluidStructureProblem::solve_iterative()
                             stokes_preconditioner,
                             mp_preconditioner,
                             elasticity_preconditioner);
-  // #    else
-  //   PreconditionBlockTriangular preconditioner;
-  //   preconditioner.initialize(system_matrix.block(0, 0),
-  //                             pressure_mass.block(1, 1),
-  //                             system_matrix.block(1, 0),
-  //                             system_matrix.block(2, 0),
-  //                             system_matrix.block(2, 1),
-  //                             system_matrix.block(2, 2));
-  // #    endif
   SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
   solver.solve(system_matrix,
                completely_distributed_solution,
