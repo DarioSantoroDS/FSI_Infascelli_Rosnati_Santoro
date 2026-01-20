@@ -1647,7 +1647,6 @@ FluidStructureProblem::compute_displacement_error(
 void
 FluidStructureProblem::compute_error(const unsigned int refinement_cycle)
 {
-  const double h = 1.0 / (problemsize * std::pow(2, refinement_cycle));
 #ifndef EXACT_TABLE
   pcout << "L2_norm:" << std::endl;
 #endif
@@ -1663,6 +1662,7 @@ FluidStructureProblem::compute_error(const unsigned int refinement_cycle)
   double H1_error_displacement =
     compute_displacement_error(VectorTools::H1_norm);
 #ifdef EXACT_TABLE
+  const double h = 2.0 / (problemsize * std::pow(2, refinement_cycle));
   velocity_convergence_table.add_value("h", h);
   velocity_convergence_table.add_value("L2", L2_error_velocity);
   velocity_convergence_table.add_value("H1", H1_error_velocity);
