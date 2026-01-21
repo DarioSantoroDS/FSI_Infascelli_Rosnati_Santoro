@@ -1,5 +1,108 @@
 #include "FluidStructureProblem.hpp"
 
+template <int dim>
+void extract_elasticity_constant_modes_bool(
+  const DoFHandler<dim>      &dof_handler,
+  const IndexSet                 &locally_owned_dofs_global, // The monolithic owned set
+  std::vector<std::vector<bool>> &constant_modes)
+{
+  const unsigned int elasticity_start_index = dim + 1;
+  const unsigned int n_elasticity_comps     = dim;
+
+  // We need to know exactly which global indices correspond to elasticity
+  // to determine the size of the output vector and the mapping.
+
+  IndexSet elasticity_locally_owned(locally_owned_dofs_global.size());
+
+  std::vector<types::global_dof_index> local_dof_indices;
+
+  for (const auto &cell : dof_handler.active_cell_iterators())
+    {
+      if (!cell->is_locally_owned())
+        continue;
+
+      const auto &fe = cell->get_fe();
+
+      // Skip Stokes cells (where elasticity is FE_Nothing)
+      // if (fe.get_nonzero_components()[elasticity_start_index] == false)
+      //   continue;
+
+      const unsigned int dofs_per_cell = fe.dofs_per_cell;
+      if (local_dof_indices.size() != dofs_per_cell)
+        local_dof_indices.resize(dofs_per_cell);
+
+      cell->get_dof_indices(local_dof_indices);
+
+      for (unsigned int i = 0; i < dofs_per_cell; ++i)
+        {
+          const unsigned int global_component =
+            fe.system_to_component_index(i).first;
+
+          // If this DoF belongs to elasticity...
+          if (global_component >= elasticity_start_index &&
+              global_component < elasticity_start_index + n_elasticity_comps)
+            {
+              // ...and is owned by this process
+              if (locally_owned_dofs_global.is_element(local_dof_indices[i]))
+                {
+                  elasticity_locally_owned.add_index(local_dof_indices[i]);
+                }
+            }
+        }
+    }
+
+  elasticity_locally_owned.compress();
+
+  // The size is now strictly the number of elasticity DoFs, not total DoFs.
+  const unsigned int n_elasticity_dofs_local =
+    elasticity_locally_owned.n_elements();
+
+  constant_modes.clear();
+  constant_modes.resize(n_elasticity_comps,
+                        std::vector<bool>(n_elasticity_dofs_local, false));
+
+  // We iterate again to map specific components (x, y) to the new dense
+  // indices.
+
+  for (const auto &cell : dof_handler.active_cell_iterators())
+    {
+      if (!cell->is_locally_owned())
+        continue;
+
+      const auto &fe = cell->get_fe();
+      // if (fe.get_nonzero_components()[elasticity_start_index] == false)
+      //   continue;
+
+      // We don't need to resize local_dof_indices again, it's reused
+      cell->get_dof_indices(local_dof_indices);
+      const unsigned int dofs_per_cell = fe.dofs_per_cell;
+
+      for (unsigned int i = 0; i < dofs_per_cell; ++i)
+        {
+          const types::global_dof_index global_index = local_dof_indices[i];
+
+          // Check if this is one of our collected elasticity DoFs
+          // (This check implicitly handles ownership and component validity)
+          if (elasticity_locally_owned.is_element(global_index))
+            {
+              const unsigned int global_component =
+                fe.system_to_component_index(i).first;
+
+              // Calculate which mode (0=x, 1=y)
+              const unsigned int mode_index =
+                global_component - elasticity_start_index;
+
+              // KEY STEP: Map global index to the dense block index [0,
+              // n_elast)
+              const types::global_dof_index block_index =
+                elasticity_locally_owned.index_within_set(global_index);
+
+              constant_modes[mode_index][block_index] = true;
+            }
+        }
+    }
+}
+
 // functions for the ParameterReader class
 void
 ParameterReader::declare_parameters()
@@ -1293,10 +1396,13 @@ FluidStructureProblem::assemble_preconditioners()
   //                                        elasticity_components));
   // elasticity_amg_data.constant_modes_values = rigid_body_modes;
   std::vector<std::vector<bool>> elasticity_constant_modes;
-  DoFTools::extract_constant_modes(dof_handler,
-                                   fe_collection.component_mask(
-                                     elasticity_components),
-                                   elasticity_constant_modes);
+  // DoFTools::extract_constant_modes(dof_handler,
+  //                                  fe_collection.component_mask(
+  //                                    elasticity_components),
+  //                                  elasticity_constant_modes);
+  extract_elasticity_constant_modes_bool<dim>(dof_handler,
+                                         locally_owned_dofs,
+                                         elasticity_constant_modes);
   elasticity_amg_data.constant_modes = elasticity_constant_modes;
 #  ifdef VERBOSE
   std::cout << elasticity_constant_modes.size()

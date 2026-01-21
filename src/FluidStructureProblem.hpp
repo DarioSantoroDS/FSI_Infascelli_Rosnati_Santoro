@@ -67,7 +67,6 @@
 // #define EXACT
 // #define EXACT_TABLE
 #define USE_CONSTANT_MODES
-
 // When compiled in deal.II DEBUG mode, there is a problem:
 // depending on the version an assert inside the
 //  DoFTools::extract_constant_modes()
@@ -961,7 +960,7 @@ public:
                                dst.block(0),
                                src.block(0),
                                *preconditioner_velocity);
-#ifdef DEBUG
+#ifdef VERBOSE
       std::cout << "  " << solver_control_velocity.last_step()
                 << " CG1 iterations" << std::endl;
 #endif
@@ -976,7 +975,7 @@ public:
                                dst.block(1),
                                tmpStokes,
                                *preconditioner_pressure);
-#ifdef DEBUG
+#ifdef VERBOSE
       std::cout << "  " << solver_control_pressure.last_step()
                 << " CG2 iterations" << std::endl;
 #endif
@@ -997,7 +996,7 @@ public:
                             dst.block(2),
                             tmpStokes,
                             *preconditioner_solid);
-#ifdef DEBUG
+#ifdef VERBOSE
       std::cout << "  " << solver_control_solid.last_step() << " CG3 iterations"
                 << std::endl;
 #endif
