@@ -34,15 +34,8 @@ main(int argc, char *argv[])
       flow_problem.setup_dofs();
       flow_problem.assemble_system();
       flow_problem.assemble_preconditioners();
-#ifdef DEBUG
-      flow_problem.output_matrix(); // output matrix not anymore implemented, we used it to debug when PETSc was implemented and
-                                    // we could output the matrix to check it on matlab
-#endif
 #ifdef ITERATIVE_SOLVER
       flow_problem.solve_iterative();
-#endif
-#ifdef DIRECT_SOLVER
-      flow_problem.solve(); // direct solver not anymore implemented, we used it when the matrix was not a block matrix
 #endif
       flow_problem.output_results(refinement_cycle);
 #ifdef EXACT

@@ -696,7 +696,6 @@ FluidStructureProblem::setup_dofs()
   // initialized
   system_matrix.clear();
   pressure_mass.clear();
-  pressure_laplacian.clear();
   BlockDynamicSparsityPattern dsp(dofs_per_block, dofs_per_block);
 
   Table<2, DoFTools::Coupling> cell_coupling(fe_collection.n_components(),
@@ -758,7 +757,6 @@ FluidStructureProblem::setup_dofs()
                                              locally_relevant_dofs);
   constraints.condense(dsp_pressure);
   pressure_mass.reinit(block_owned_dofs, dsp_pressure, MPI_COMM_WORLD);
-  pressure_laplacian.reinit(block_owned_dofs, dsp_pressure, MPI_COMM_WORLD); 
 #endif
 #ifdef VERBOSE
   pcout << "Dofs initialized!" << std::endl;
@@ -1145,49 +1143,6 @@ FluidStructureProblem::assemble_system()
       constraints.distribute_local_to_global(local_pressure_matrix,
                                              pressure_global_dof_indices,
                                              pressure_mass);
-      // Now we assemble the pressure Laplacian matrix
-      // Resize the small structures
-      const unsigned int n_pressure_dofs_ = pressure_local_indices.size();
-      FullMatrix<double> local_pressure_matrix_(n_pressure_dofs_,
-                                               n_pressure_dofs_);
-      std::vector<types::global_dof_index> pressure_global_dof_indices_(
-        n_pressure_dofs_);
-
-      // Fill the small matrix and indices
-      for (unsigned int i = 0; i < n_pressure_dofs_; ++i)
-        {
-          const unsigned int original_i_  = pressure_local_indices[i];
-          pressure_global_dof_indices_[i] = dof_indices[original_i_];
-
-          for (unsigned int j = 0; j < n_pressure_dofs_; ++j)
-            {
-              const unsigned int original_j = pressure_local_indices[j];
-
-              double value_ = 0.0;
-              for (unsigned int q = 0; q < fe_values.n_quadrature_points; ++q)
-                {
-                  // CHANGE: Use gradients instead of shape values
-                  const Tensor<1, dim> grad_phi_i =
-                    fe_values[pressure].gradient(original_i_, q);
-                  const Tensor<1, dim> grad_phi_j_ =
-                    fe_values[pressure].gradient(original_j, q);
-
-                  // CHANGE: Form the Laplacian (grad_phi_i * grad_phi_j_)
-                  // We keep the viscosity scaling consistent with the Schur
-                  // complement approximation
-                    value_ +=
-                    (grad_phi_i * grad_phi_j_) / viscosity * fe_values.JxW(q);
-                }
-              local_pressure_matrix_(i, j) = value_;
-            }
-        }
-
-      // Distribute to the new Laplacian matrix
-      // Make sure you have declared 'pressure_laplacian' in your class
-      // and initialized it with the same sparsity pattern as pressure_mass
-      constraints.distribute_local_to_global(local_pressure_matrix_,
-                                             pressure_global_dof_indices_,
-                                             pressure_laplacian);
 
       // The more interesting part of this function is where
       // we see about
@@ -1432,15 +1387,6 @@ FluidStructureProblem::assemble_preconditioners()
                                    stokes_constant_modes);
   stokes_amg_data.constant_modes = stokes_constant_modes;
   const FEValuesExtractors::Vector elasticity_components(dim + 1);
-  // std::vector<std::vector<double>> rigid_body_modes;
-
-  // hp::MappingCollection<dim> mapping_collection(MappingQ<dim>(1));
-  // rigid_body_modes =
-  //   DoFTools::extract_rigid_body_modes(mapping_collection,
-  //                                      dof_handler,
-  //                                      fe_collection.component_mask(
-  //                                        elasticity_components));
-  // elasticity_amg_data.constant_modes_values = rigid_body_modes;
   std::vector<std::vector<bool>> elasticity_constant_modes;
   // DoFTools::extract_constant_modes(dof_handler,
   //                                  fe_collection.component_mask(
@@ -1481,68 +1427,13 @@ FluidStructureProblem::assemble_preconditioners()
 
   stokes_preconditioner->initialize(system_matrix.block(0, 0), stokes_amg_data);
   mp_preconditioner->initialize(pressure_mass.block(1, 1));
+
   elasticity_preconditioner->initialize(system_matrix.block(2, 2),
                                         elasticity_amg_data);
 #ifdef VERBOSE
   pcout << "Preconditioners assembled!" << std::endl;
 #endif
 }
-#ifdef DEBUG
-// not anymore implemented
-void
-FluidStructureProblem::output_matrix() const
-{
-#  ifdef USE_PETSC_LA
-  PetscViewer mat_viewer;
-  // Create an ASCII viewer that writes to "system_matrix.m"
-  PetscViewerASCIIOpen(system_matrix.get_mpi_communicator(),
-                       "system_matrix.m",
-                       &mat_viewer);
-  // Set format to MATLAB (this produces a coordinate list)
-  PetscViewerPushFormat(mat_viewer, PETSC_VIEWER_ASCII_MATLAB);
-  // View the matrix (deal.II object converts to PETSc Mat automatically)
-  MatView(system_matrix, mat_viewer);
-  PetscViewerPopFormat(mat_viewer);
-  PetscViewerDestroy(&mat_viewer);
-  PetscViewer vec_viewer;
-  PetscViewerASCIIOpen(system_rhs.get_mpi_communicator(),
-                       "system_rhs.m",
-                       &vec_viewer);
-
-  // Set format to MATLAB (prints entries one by one)
-  PetscViewerPushFormat(vec_viewer, PETSC_VIEWER_ASCII_MATLAB);
-
-  // View the vector
-  VecView(system_rhs, vec_viewer);
-  PetscViewerPopFormat(vec_viewer);
-  PetscViewerDestroy(&vec_viewer);
-#  endif
-}
-#endif
-#ifdef DIRECT_SOLVER
-// not anymore implemented
-void
-FluidStructureProblem::solve()
-{
-  TimerOutput::Scope t(timer, "solve");
-
-  pcout << "solvingthissutff" << std::endl;
-  LA::MPI::BlockVector completely_distributed_solution(block_owned_dofs,
-                                                       MPI_COMM_WORLD);
-#  ifdef FORCE_USE_OF_TRILINOS
-  SolverControl                  solver_control(1, 0);
-  TrilinosWrappers::SolverDirect direct(solver_control);
-  direct.solve(system_matrix, completely_distributed_solution, system_rhs);
-#  else
-  SolverControl                    cn;
-  PETScWrappers::SparseDirectMUMPS solver(cn, MPI_COMM_WORLD);
-  solver.set_symmetric_mode(false);
-  solver.solve(system_matrix, completely_distributed_solution, system_rhs);
-#  endif
-  constraints.distribute(completely_distributed_solution);
-  locally_relevant_solution = completely_distributed_solution;
-}
-#endif
 
 #ifdef ITERATIVE_SOLVER
 void
@@ -1562,9 +1453,9 @@ FluidStructureProblem::solve_iterative()
 
 #  ifdef FORCE_USE_OF_TRILINOS
 
-  PreconditionBlockTriangularSimple preconditioner;
+  PreconditionBlockTriangularAMG preconditioner;
   preconditioner.initialize(system_matrix.block(0, 0),
-                            pressure_laplacian.block(1, 1),
+                            pressure_mass.block(1, 1),
                             system_matrix.block(1, 0),
                             system_matrix.block(2, 0),
                             system_matrix.block(2, 1),
@@ -1581,19 +1472,6 @@ FluidStructureProblem::solve_iterative()
         << std::endl;
 #  else
   Assert(false, ExcNotImplemented());
-
-  // // PETScWrappers::PreconditionBlockJacobi::AdditionalData data;
-  // // // This tells Block Jacobi to use ILU on the local blocks
-  // // data.internal_preconditioner_type = "ilu";
-  // PETScWrappers::PreconditionBoomerAMG preconditioner(MPI_COMM_WORLD);
-  // preconditioner.initialize(system_matrix);
-  // PETScWrappers::SolverGMRES solver(solver_control, MPI_COMM_WORLD);
-  // solver.solve(system_matrix,
-  //              completely_distributed_solution,
-  //              system_rhs,
-  //              preconditioner);
-  // pcout << "  " << solver_control.last_step() << " GMRES iterations"
-  //       << std::endl;
 #  endif
   constraints.distribute(completely_distributed_solution);
   locally_relevant_solution = completely_distributed_solution;
