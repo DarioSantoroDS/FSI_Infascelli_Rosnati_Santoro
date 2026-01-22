@@ -1,5 +1,108 @@
 #include "FluidStructureProblem.hpp"
 
+template <int dim>
+void extract_elasticity_constant_modes_bool(
+  const DoFHandler<dim>      &dof_handler,
+  const IndexSet                 &locally_owned_dofs_global, // The monolithic owned set
+  std::vector<std::vector<bool>> &constant_modes)
+{
+  const unsigned int elasticity_start_index = dim + 1;
+  const unsigned int n_elasticity_comps     = dim;
+
+  // We need to know exactly which global indices correspond to elasticity
+  // to determine the size of the output vector and the mapping.
+
+  IndexSet elasticity_locally_owned(locally_owned_dofs_global.size());
+
+  std::vector<types::global_dof_index> local_dof_indices;
+
+  for (const auto &cell : dof_handler.active_cell_iterators())
+    {
+      if (!cell->is_locally_owned())
+        continue;
+
+      const auto &fe = cell->get_fe();
+
+      // Skip Stokes cells (where elasticity is FE_Nothing)
+      // if (fe.get_nonzero_components()[elasticity_start_index] == false)
+      //   continue;
+
+      const unsigned int dofs_per_cell = fe.dofs_per_cell;
+      if (local_dof_indices.size() != dofs_per_cell)
+        local_dof_indices.resize(dofs_per_cell);
+
+      cell->get_dof_indices(local_dof_indices);
+
+      for (unsigned int i = 0; i < dofs_per_cell; ++i)
+        {
+          const unsigned int global_component =
+            fe.system_to_component_index(i).first;
+
+          // If this DoF belongs to elasticity...
+          if (global_component >= elasticity_start_index &&
+              global_component < elasticity_start_index + n_elasticity_comps)
+            {
+              // ...and is owned by this process
+              if (locally_owned_dofs_global.is_element(local_dof_indices[i]))
+                {
+                  elasticity_locally_owned.add_index(local_dof_indices[i]);
+                }
+            }
+        }
+    }
+
+  elasticity_locally_owned.compress();
+
+  // The size is now strictly the number of elasticity DoFs, not total DoFs.
+  const unsigned int n_elasticity_dofs_local =
+    elasticity_locally_owned.n_elements();
+
+  constant_modes.clear();
+  constant_modes.resize(n_elasticity_comps,
+                        std::vector<bool>(n_elasticity_dofs_local, false));
+
+  // We iterate again to map specific components (x, y) to the new dense
+  // indices.
+
+  for (const auto &cell : dof_handler.active_cell_iterators())
+    {
+      if (!cell->is_locally_owned())
+        continue;
+
+      const auto &fe = cell->get_fe();
+      // if (fe.get_nonzero_components()[elasticity_start_index] == false)
+      //   continue;
+
+      // We don't need to resize local_dof_indices again, it's reused
+      cell->get_dof_indices(local_dof_indices);
+      const unsigned int dofs_per_cell = fe.dofs_per_cell;
+
+      for (unsigned int i = 0; i < dofs_per_cell; ++i)
+        {
+          const types::global_dof_index global_index = local_dof_indices[i];
+
+          // Check if this is one of our collected elasticity DoFs
+          // (This check implicitly handles ownership and component validity)
+          if (elasticity_locally_owned.is_element(global_index))
+            {
+              const unsigned int global_component =
+                fe.system_to_component_index(i).first;
+
+              // Calculate which mode (0=x, 1=y)
+              const unsigned int mode_index =
+                global_component - elasticity_start_index;
+
+              // KEY STEP: Map global index to the dense block index [0,
+              // n_elast)
+              const types::global_dof_index block_index =
+                elasticity_locally_owned.index_within_set(global_index);
+
+              constant_modes[mode_index][block_index] = true;
+            }
+        }
+    }
+}
+
 // functions for the ParameterReader class
 void
 ParameterReader::declare_parameters()
@@ -52,6 +155,83 @@ ParameterReader::declare_parameters()
                       "The second Lamé parameter of the solid");
   }
   prm.leave_subsection();
+  prm.enter_subsection("Stokes AMG");
+  {
+    prm.declare_entry("Smoother sweeps",
+                      "2",
+                      Patterns::Integer(1),
+                      "Number of smoother sweeps.");
+
+    prm.declare_entry("Aggregation threshold",
+                      "1e-2",
+                      Patterns::Double(0.0),
+                      "Threshold for aggregating nodes in AMG.");
+
+    prm.declare_entry("Number of cycles",
+                      "1",
+                      Patterns::Integer(1),
+                      "Number of AMG cycles (1 means one V-cycle or W-cycle).");
+
+    prm.declare_entry("W cycle",
+                      "false",
+                      Patterns::Bool(),
+                      "Use W-cycles (true) instead of V-cycles (false).");
+
+    prm.declare_entry("Smoother overlap",
+                      "0",
+                      Patterns::Integer(0),
+                      "Overlap for the smoother application.");
+    prm.declare_entry("Output details",
+                      "false",
+                      Patterns::Bool(),
+                      "Verbose Output detail from ML epetra.");
+    prm.declare_entry(
+      "Smoother type",
+      "Chebyshev",
+      Patterns::Selection(
+        "Chebyshev|Relaxation|ILU|Jacobi|Gauss-Seidel|Symmetric Gauss-Seidel|Block Chebyshev"),
+      "Type of smoother used in AMG.");
+  }
+  prm.leave_subsection();
+  prm.enter_subsection("Elasticity AMG");
+  {
+    prm.declare_entry("Smoother sweeps",
+                      "2",
+                      Patterns::Integer(1),
+                      "Number of smoother sweeps.");
+
+    prm.declare_entry("Aggregation threshold",
+                      "1e-2",
+                      Patterns::Double(0.0),
+                      "Threshold for aggregating nodes in AMG.");
+
+    prm.declare_entry("Number of cycles",
+                      "1",
+                      Patterns::Integer(1),
+                      "Number of AMG cycles (1 means one V-cycle or W-cycle).");
+
+    prm.declare_entry("W cycle",
+                      "false",
+                      Patterns::Bool(),
+                      "Use W-cycles (true) instead of V-cycles (false).");
+
+    prm.declare_entry("Smoother overlap",
+                      "0",
+                      Patterns::Integer(0),
+                      "Overlap for the smoother application.");
+    prm.declare_entry("Output details",
+                      "false",
+                      Patterns::Bool(),
+                      "Verbose Output detail from ML epetra.");
+
+    prm.declare_entry(
+      "Smoother type",
+      "Chebyshev",
+      Patterns::Selection(
+        "Chebyshev|Relaxation|ILU|Jacobi|Gauss-Seidel|Symmetric Gauss-Seidel|Block Chebyshev"),
+      "Type of smoother used in AMG.");
+  }
+  prm.leave_subsection();
 }
 
 void
@@ -100,13 +280,68 @@ FluidStructureProblem::make_grid()
 {
   TimerOutput::Scope t(timer, "make_grid");
   pcout << "   Generating the mesh..." << std::endl;
-  // useful if we want to set different weights to the cells in different physics domains
-  // prm.enter_subsection("Geometry");
-  // const int fluid_weight = prm.get_integer("Fluid weight");
-  // const int solid_weight = prm.get_integer("Solid weight");
-  // prm.leave_subsection();
+  // useful if we want to set different weights to the cells in different
+  // physics domains prm.enter_subsection("Geometry"); const int fluid_weight =
+  // prm.get_integer("Fluid weight"); const int solid_weight =
+  // prm.get_integer("Solid weight"); prm.leave_subsection();
   GridGenerator::subdivided_hyper_cube(triangulation, problemsize, -1, 1);
+#ifdef EXACT
+  for (const auto &cell : triangulation.active_cell_iterators())
+    {
+      if (((std::fabs(cell->center()[0]) < 0.25) &&
+           (cell->center()[dim - 1] > 0.5)) ||
+          ((std::fabs(cell->center()[0]) >= 0.25) &&
+           (cell->center()[dim - 1] > -0.5)))
+        cell->set_material_id(fluid_domain_id);
+      else
+        cell->set_material_id(solid_domain_id);
+    }
 
+  for (const auto &cell : triangulation.active_cell_iterators())
+    {
+      if (cell->material_id() == fluid_domain_id)
+        {
+          for (const auto &face : cell->face_iterators())
+            {
+              if (!face->at_boundary())
+                continue;
+              const auto &x = face->center();
+
+              // sopra
+              if (std::fabs(x[dim - 1] - 1.0) < 1e-12)
+                face->set_all_boundary_ids(1);
+
+              // sinistra
+              else if (std::fabs(x[0] + 1.0) < 1e-12)
+                face->set_all_boundary_ids(2);
+
+              // destra
+              else if (std::fabs(x[0] - 1.0) < 1e-12)
+                face->set_all_boundary_ids(3);
+            }
+        }
+      else if (cell->material_id() == solid_domain_id)
+        {
+          for (const auto &face : cell->face_iterators())
+            {
+              if (!face->at_boundary())
+                continue;
+              const auto &x = face->center();
+              // sinistra
+              if (std::fabs(x[0] + 1.0) < 1e-12)
+                face->set_all_boundary_ids(4);
+
+              // destra
+              else if (std::fabs(x[0] - 1.0) < 1e-12)
+                face->set_all_boundary_ids(4);
+
+              // fondo
+              else if (std::fabs(x[dim - 1] + 1.0) < 1e-12)
+                face->set_all_boundary_ids(4);
+            }
+        }
+    }
+#else
   for (const auto &cell : triangulation.active_cell_iterators())
     {
       for (const auto &face : cell->face_iterators())
@@ -123,32 +358,34 @@ FluidStructureProblem::make_grid()
       else
         cell->set_material_id(solid_domain_id);
     }
-//  functions necessary to use for the 
-//  parallel::distributed::Triangulation::::execute_coarsening_and_refinement()	
-//  method when giving weights to the cells in different physics domains.
+#endif
+    //  functions necessary to use for the
+    //  parallel::distributed::Triangulation::::execute_coarsening_and_refinement()
+    //  method when giving weights to the cells in different physics domains.
 
-  // triangulation.signals.cell_weight.connect(
-  //   [&](const typename
-  //   parallel::distributed::Triangulation<dim>::cell_iterator
-  //         &cell,
-  //       const typename parallel::distributed::Triangulation<dim>::CellStatus
-  //         status) -> unsigned int {
-  //     // If the cell is in the fluid domain, make it "heavy".
-  //     // This forces the partitioner to put FEWER fluid cells on a process.
-  //     if (cell->material_id() == fluid_domain_id)
-  //       {
-  //         // Adjust this ratio based on actual cost (e.g., 5x, 10x expensive)
-  //         return fluid_weight;
-  //       }
-  //     else
-  //       {
-  //         // Solid cells are "light", so a process can handle many of them.
-  //         return solid_weight;
-  //       }
-  //   });
+    // triangulation.signals.cell_weight.connect(
+    //   [&](const typename
+    //   parallel::distributed::Triangulation<dim>::cell_iterator
+    //         &cell,
+    //       const typename
+    //       parallel::distributed::Triangulation<dim>::CellStatus
+    //         status) -> unsigned int {
+    //     // If the cell is in the fluid domain, make it "heavy".
+    //     // This forces the partitioner to put FEWER fluid cells on a process.
+    //     if (cell->material_id() == fluid_domain_id)
+    //       {
+    //         // Adjust this ratio based on actual cost (e.g., 5x, 10x
+    //         expensive) return fluid_weight;
+    //       }
+    //     else
+    //       {
+    //         // Solid cells are "light", so a process can handle many of them.
+    //         return solid_weight;
+    //       }
+    //   });
 
-  // // Force a repartition now that weights and IDs are defined
-  // triangulation.repartition();
+    // // Force a repartition now that weights and IDs are defined
+    // triangulation.repartition();
 #ifdef VERBOSE
   pcout << "Mesh generated!" << std::endl;
 #endif
@@ -180,7 +417,8 @@ FluidStructureProblem::setup_dofs()
 
   set_active_fe_indices();
   dof_handler.distribute_dofs(fe_collection);
-  // DoFRenumbering::Cuthill_McKee(dof_handler); // we tried to use this, but didn't seem to help
+  // DoFRenumbering::Cuthill_McKee(dof_handler); // we tried to use this, but
+  // didn't seem to help
   std::vector<unsigned int> block_component(dim + 1 + dim, 0);
   block_component[dim] = 1;
   for (unsigned int i = dim + 1; i < dim + dim + 1; ++i)
@@ -189,7 +427,7 @@ FluidStructureProblem::setup_dofs()
 
   locally_owned_dofs = dof_handler.locally_owned_dofs();
   DoFTools::extract_locally_relevant_dofs(dof_handler, locally_relevant_dofs);
-// set up for the block structure
+  // set up for the block structure
   std::vector<types::global_dof_index> dofs_per_block =
     DoFTools::count_dofs_per_fe_block(dof_handler, block_component);
   const unsigned int n_u = dofs_per_block[0];
@@ -227,7 +465,85 @@ FluidStructureProblem::setup_dofs()
   constraints.clear();
   constraints.reinit(locally_relevant_dofs);
   DoFTools::make_hanging_node_constraints(dof_handler, constraints);
+#ifdef EXACT
+  const FEValuesExtractors::Vector velocities(0);
+  VectorTools::interpolate_boundary_values(dof_handler,
+                                           1,
+                                           ExactSolution_u(),
+                                           constraints,
+                                           fe_collection.component_mask(
+                                             velocities));
 
+  const FEValuesExtractors::Vector displacements(dim + 1);
+  VectorTools::interpolate_boundary_values(
+    dof_handler,
+    4,
+    ExactSolution_d(),
+    // Functions::ZeroFunction<dim>(dim + 1 + dim),
+    constraints,
+    fe_collection.component_mask(displacements));
+  // There are more constraints we have to handle, though: we have to make
+  // sure that the velocity is zero at the interface between fluid and
+  // solid. The following piece of code was already presented in the
+  // introduction:
+  {
+    std::vector<types::global_dof_index> local_face_dof_indices(
+      stokes_fe.n_dofs_per_face());
+    for (const auto &cell : dof_handler.active_cell_iterators())
+      {
+        if (!cell->is_locally_owned())
+          continue;
+
+        if (cell_is_in_fluid_domain(cell))
+          for (const auto face_no : cell->face_indices())
+            if (cell->face(face_no)->at_boundary() == false)
+              {
+                bool face_is_on_interface = false;
+
+                if ((cell->neighbor(face_no)->has_children() == false) &&
+                    (cell_is_in_solid_domain(cell->neighbor(face_no))))
+                  face_is_on_interface = true;
+                else if (cell->neighbor(face_no)->has_children() == true)
+                  {
+                    for (unsigned int sf = 0;
+                         sf < cell->face(face_no)->n_children();
+                         ++sf)
+                      if (cell_is_in_solid_domain(
+                            cell->neighbor_child_on_subface(face_no, sf)))
+                        {
+                          face_is_on_interface = true;
+                          break;
+                        }
+                  }
+
+                if (face_is_on_interface)
+                  {
+                    cell->face(face_no)->get_dof_indices(local_face_dof_indices,
+                                                         0);
+                    for (unsigned int i = 0; i < local_face_dof_indices.size();
+                         ++i)
+                      if (stokes_fe.face_system_to_component_index(i).first <
+                          dim)
+                        constraints.add_line(local_face_dof_indices[i]);
+                  }
+              }
+      }
+  }
+
+  // At the end of all this, we can declare to the constraints object that
+  // we now have all constraints ready to go and that the object can rebuild
+  // its internal data structures for better efficiency:
+  // constraints.make_consistent_in_parallel(locally_owned_dofs,locally_relevant_dofs,MPI_COMM_WORLD);
+
+  // std::vector<IndexSet> locally_test;
+  // locally_test = Utilities::MPI::all_gather(MPI_COMM_WORLD,
+  // locally_owned_dofs); IndexSet active_test;
+  // DoFTools::extract_locally_active_dofs(dof_handler,active_test);
+  // bool is_this_consistent =
+  // constraints.is_consistent_in_parallel(locally_test,active_test,MPI_COMM_WORLD,true);
+  // std::cout<< is_this_consistent << std::endl;
+  constraints.close();
+#else
   const FEValuesExtractors::Vector velocities(0);
   VectorTools::interpolate_boundary_values(dof_handler,
                                            1,
@@ -295,6 +611,7 @@ FluidStructureProblem::setup_dofs()
   // we now have all constraints ready to go and that the object can rebuild
   // its internal data structures for better efficiency:
   constraints.close();
+#endif
 #ifdef VERBOSE
   pcout << "   Number of active cells: " << triangulation.n_active_cells()
         << std::endl
@@ -306,8 +623,9 @@ FluidStructureProblem::setup_dofs()
   // then also set vectors to their correct sizes:
 #ifdef FORCE_USE_OF_TRILINOS
 #  ifndef ALTERNATIVE_PATTERN
-  // Right now this pattern is not working, but we tested it in the past and didn't yelded 
-  // different results from the alternative one, so we keep it commented out for possible future use.
+  // Right now this pattern is not working, but we tested it in the past and
+  // didn't yelded different results from the alternative one, so we keep it
+  // commented out for possible future use.
   TrilinosWrappers::BlockSparsityPattern dsp(block_owned_dofs,
                                              block_owned_dofs,
                                              block_relevant_dofs,
@@ -374,7 +692,8 @@ FluidStructureProblem::setup_dofs()
 #  endif
 #endif
 #ifdef ALTERNATIVE_PATTERN
-// resetting the matrix and pressure mass in case they were already initialized
+  // resetting the matrix and pressure mass in case they were already
+  // initialized
   system_matrix.clear();
   pressure_mass.clear();
   BlockDynamicSparsityPattern dsp(dofs_per_block, dofs_per_block);
@@ -410,7 +729,7 @@ FluidStructureProblem::setup_dofs()
 
   constraints.condense(dsp);
 
-  dsp.compress(); 
+  dsp.compress();
   system_matrix.reinit(block_owned_dofs, dsp, MPI_COMM_WORLD);
   system_rhs.reinit(block_owned_dofs, MPI_COMM_WORLD);
 
@@ -453,7 +772,13 @@ FluidStructureProblem::assemble_system()
   system_matrix = 0.0;
   system_rhs    = 0.0;
   pressure_mass = 0.0;
-// setting all the objects needed for the assembly process
+#ifdef EXACT
+  ExactForce_f        right_hand_side(viscosity);
+  ExactForce_g        solid_rhs(mu);
+  ExactNeumann_hRight neumann_rhs(viscosity);
+  ExactNeumann_hLeft  neumann_left(viscosity);
+#endif
+  // setting all the objects needed for the assembly process
   const QGauss<dim> stokes_quadrature(stokes_degree + 2);
   const QGauss<dim> elasticity_quadrature(elasticity_degree + 2);
 
@@ -502,9 +827,9 @@ FluidStructureProblem::assemble_system()
   std::vector<types::global_dof_index> local_dof_indices;
   std::vector<types::global_dof_index> neighbor_dof_indices(
     stokes_dofs_per_cell);
-
+#ifndef EXACT
   const Functions::ZeroFunction<dim> right_hand_side(dim + 1);
-
+#endif
   // ...to variables that allow us to extract certain components of the
   // shape functions and cache their values rather than having to recompute
   // them at every quadrature point:
@@ -555,7 +880,105 @@ FluidStructureProblem::assemble_system()
       // The actual computation of the local matrix is the same as in
       // step-22 as well as that given in the @ref vector_valued
       // documentation module for the elasticity equations:
+
       if (cell_is_in_fluid_domain(cell))
+#ifdef EXACT
+        {
+          const unsigned int dofs_per_cell = cell->get_fe().n_dofs_per_cell();
+          Assert(dofs_per_cell == stokes_dofs_per_cell, ExcInternalError());
+
+          for (unsigned int q = 0; q < fe_values.n_quadrature_points; ++q)
+            {
+              // MANIF
+              Tensor<1, dim>    f_q;
+              const Point<dim> &p_q = fe_values.quadrature_point(q);
+              for (unsigned int d = 0; d < dim; ++d)
+                f_q[d] = right_hand_side.value(p_q, d);
+
+
+              // Tensor<1, dim> g_q;
+              // for (unsigned int d = 0; d < dim; ++d)
+              //     g_q[d] = solid_rhs.value(p_q, d + (dim+1)); // offset sulle
+              //     componenti del solido
+              // END MANIF
+
+              for (unsigned int k = 0; k < dofs_per_cell; ++k)
+                {
+                  stokes_symgrad_phi_u[k] =
+                    fe_values[velocities].symmetric_gradient(k, q);
+                  stokes_div_phi_u[k] = fe_values[velocities].divergence(k, q);
+                  stokes_phi_p[k]     = fe_values[pressure].value(k, q);
+                }
+
+              // Right-hand side contribution
+              for (unsigned int i = 0; i < dofs_per_cell; ++i)
+                {
+                  const Tensor<1, dim> phi_iflu =
+                    fe_values[velocities].value(i, q);
+                  local_rhs[i] +=
+                    scalar_product(f_q, phi_iflu) * fe_values.JxW(q);
+
+                  // const Tensor<1, dim> phi_isol=
+                  // fe_values[displacements].value(i, q); local_rhs[i] += g_q *
+                  // phi_isol * fe_values.JxW(q);
+                }
+
+              for (unsigned int i = 0; i < dofs_per_cell; ++i)
+                for (unsigned int j = 0; j < dofs_per_cell; ++j)
+                  local_matrix(i, j) +=
+                    (2 * viscosity * stokes_symgrad_phi_u[i] *
+                       stokes_symgrad_phi_u[j] -
+                     stokes_div_phi_u[i] * stokes_phi_p[j] -
+                     stokes_phi_p[i] * stokes_div_phi_u[j]) *
+                    fe_values.JxW(q);
+            }
+          std::vector<unsigned int> neumann_boundaries = {2, 3};
+          for (unsigned int f = 0; f < GeometryInfo<dim>::faces_per_cell; ++f)
+            {
+              if (cell->face(f)->at_boundary())
+                {
+                  unsigned int   bid     = cell->face(f)->boundary_id();
+                  Function<dim> *neumann = nullptr;
+
+                  if (bid == 3)
+                    neumann = &neumann_rhs;
+                  else if (bid == 2)
+                    neumann = &neumann_left;
+
+                  if (neumann)
+                    {
+                      FEFaceValues<dim> fe_face_values(
+                        stokes_fe,
+                        common_face_quadrature,
+                        update_values | update_quadrature_points |
+                          update_JxW_values | update_normal_vectors);
+
+                      fe_face_values.reinit(cell, f);
+
+                      for (unsigned int q = 0;
+                           q < fe_face_values.n_quadrature_points;
+                           ++q)
+                        {
+                          const Point<dim> &p_q =
+                            fe_face_values.quadrature_point(q);
+                          Tensor<1, dim> t_q;
+                          for (unsigned int d = 0; d < dim; ++d)
+                            t_q[d] = neumann->value(p_q, d);
+
+                          for (unsigned int i = 0; i < stokes_dofs_per_cell;
+                               ++i)
+                            {
+                              const Tensor<1, dim> phi_i =
+                                fe_face_values[velocities].value(i, q);
+                              local_rhs[i] +=
+                                t_q * phi_i * fe_face_values.JxW(q);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+#else
         {
           const unsigned int dofs_per_cell = cell->get_fe().n_dofs_per_cell();
           Assert(dofs_per_cell == stokes_dofs_per_cell, ExcInternalError());
@@ -580,6 +1003,51 @@ FluidStructureProblem::assemble_system()
                     fe_values.JxW(q);
             }
         }
+#endif
+#ifdef EXACT
+      else
+        {
+          const unsigned int dofs_per_cell = cell->get_fe().n_dofs_per_cell();
+          Assert(dofs_per_cell == elasticity_dofs_per_cell, ExcInternalError());
+
+          for (unsigned int q = 0; q < fe_values.n_quadrature_points; ++q)
+            {
+              for (unsigned int k = 0; k < dofs_per_cell; ++k)
+                {
+                  elasticity_grad_phi[k] =
+                    fe_values[displacements].gradient(k, q);
+                  elasticity_div_phi[k] =
+                    fe_values[displacements].divergence(k, q);
+                }
+              Tensor<1, dim>    g_q;
+              const Point<dim> &p_q = fe_values.quadrature_point(q);
+              for (unsigned int d = 0; d < dim; ++d)
+                g_q[d] = solid_rhs.value(p_q, d + (dim + 1));
+
+              // Right-hand side contribution
+              for (unsigned int i = 0; i < dofs_per_cell; ++i)
+                {
+                  const Tensor<1, dim> phi_isol =
+                    fe_values[displacements].value(i, q);
+                  local_rhs[i] +=
+                    scalar_product(g_q, phi_isol) * fe_values.JxW(q);
+                }
+
+              for (unsigned int i = 0; i < dofs_per_cell; ++i)
+                for (unsigned int j = 0; j < dofs_per_cell; ++j)
+                  {
+                    local_matrix(i, j) +=
+                      (lambda * elasticity_div_phi[i] * elasticity_div_phi[j] +
+                       mu * scalar_product(elasticity_grad_phi[i],
+                                           elasticity_grad_phi[j]) +
+                       mu * scalar_product(elasticity_grad_phi[i],
+                                           transpose(elasticity_grad_phi[j]))) *
+                      fe_values.JxW(q);
+                  }
+            }
+        }
+
+#else
       else
         {
           const unsigned int dofs_per_cell = cell->get_fe().n_dofs_per_cell();
@@ -608,6 +1076,7 @@ FluidStructureProblem::assemble_system()
                   }
             }
         }
+#endif
       // Once we have the contributions from cell integrals, we copy them
       // into the global matrix (taking care of constraints right away,
       // through the AffineConstraints::distribute_local_to_global
@@ -626,7 +1095,8 @@ FluidStructureProblem::assemble_system()
 
       for (unsigned int i = 0; i < cell->get_fe().n_dofs_per_cell(); ++i)
         {
-          // Check if this DoF belongs to the pressure component (index 'dim')
+          // Check if this DoF belongs to the pressure component (index
+          // 'dim')
           const unsigned int component_index =
             cell->get_fe().system_to_component_index(i).first;
 
@@ -638,7 +1108,8 @@ FluidStructureProblem::assemble_system()
 
       // Resize the small structures
       const unsigned int n_pressure_dofs = pressure_local_indices.size();
-      FullMatrix<double> local_pressure_matrix(n_pressure_dofs, n_pressure_dofs);
+      FullMatrix<double> local_pressure_matrix(n_pressure_dofs,
+                                               n_pressure_dofs);
       std::vector<types::global_dof_index> pressure_global_dof_indices(
         n_pressure_dofs);
 
@@ -667,11 +1138,12 @@ FluidStructureProblem::assemble_system()
         }
 
       // Distribute ONLY the pressure part
-      // This is safe because pressure_mass ONLY has pressure rows allocated.
-      constraints.distribute_local_to_global(
-        local_pressure_matrix,
-        pressure_global_dof_indices,
-        pressure_mass); 
+      // This is safe because pressure_mass ONLY has pressure rows
+      // allocated.
+      constraints.distribute_local_to_global(local_pressure_matrix,
+                                             pressure_global_dof_indices,
+                                             pressure_mass);
+
       // The more interesting part of this function is where
       // we see about
       // face terms along the interface between the two subdomains. To this
@@ -795,7 +1267,6 @@ FluidStructureProblem::assemble_system()
                                                          system_matrix);
                 }
             }
-
     }
 
   system_matrix.compress(VectorOperation::add);
@@ -872,99 +1343,97 @@ FluidStructureProblem::assemble_preconditioners()
   TimerOutput::Scope t(timer, "assemble_preconditioners");
 
   pcout << "   Building preconditioners..." << std::endl;
+  prm.enter_subsection("Stokes AMG");
   stokes_preconditioner = std::make_shared<TrilinosWrappers::PreconditionAMG>();
+  TrilinosWrappers::PreconditionAMG::AdditionalData stokes_amg_data;
+  stokes_amg_data.elliptic              = true;
+  stokes_amg_data.higher_order_elements = true;
+  stokes_amg_data.smoother_sweeps       = prm.get_integer("Smoother sweeps");
+  stokes_amg_data.aggregation_threshold =
+    prm.get_double("Aggregation threshold");
+  stokes_amg_data.n_cycles             = prm.get_integer("Number of cycles");
+  stokes_amg_data.w_cycle              = prm.get_bool("W cycle");
+  stokes_amg_data.smoother_overlap     = prm.get_integer("Smoother overlap");
+  std::string stokes_smoother_type_str = prm.get("Smoother type");
+  stokes_amg_data.smoother_type        = stokes_smoother_type_str.c_str();
+  stokes_amg_data.output_details     = prm.get_bool("Output details");
+  prm.leave_subsection(); // Leave Stokes AMG
+  mp_preconditioner = std::make_shared<TrilinosWrappers::PreconditionAMG>();
+  prm.enter_subsection("Elasticity AMG");
+  elasticity_preconditioner =
+    std::make_shared<TrilinosWrappers::PreconditionAMG>();
+  TrilinosWrappers::PreconditionAMG::AdditionalData elasticity_amg_data;
+  elasticity_amg_data.elliptic = true;
+  if (elasticity_degree >= 2)
+    elasticity_amg_data.higher_order_elements = true;
+  else
+    elasticity_amg_data.higher_order_elements = false;
+  elasticity_amg_data.smoother_sweeps = prm.get_integer("Smoother sweeps");
+  elasticity_amg_data.aggregation_threshold =
+    prm.get_double("Aggregation threshold");
+  elasticity_amg_data.n_cycles         = prm.get_integer("Number of cycles");
+  elasticity_amg_data.w_cycle          = prm.get_bool("W cycle");
+  elasticity_amg_data.smoother_overlap = prm.get_integer("Smoother overlap");
+  elasticity_amg_data.output_details    = prm.get_bool("Output details");
+  std::string elast_smoother_type_str = prm.get("Smoother type");
+  elasticity_amg_data.smoother_type   = elast_smoother_type_str.c_str();
+  prm.leave_subsection(); // Leave Elasticity AMG
+#ifdef USE_CONSTANT_MODES
   const FEValuesExtractors::Vector velocity_components(0);
   std::vector<std::vector<bool>>   stokes_constant_modes;
   DoFTools::extract_constant_modes(dof_handler,
-                                   fe_collection.component_mask(velocity_components),
+                                   fe_collection.component_mask(
+                                     velocity_components),
                                    stokes_constant_modes);
-  TrilinosWrappers::PreconditionAMG::AdditionalData stokes_amg_data;
   stokes_amg_data.constant_modes = stokes_constant_modes;
+  const FEValuesExtractors::Vector elasticity_components(dim + 1);
+  std::vector<std::vector<bool>> elasticity_constant_modes;
+  // DoFTools::extract_constant_modes(dof_handler,
+  //                                  fe_collection.component_mask(
+  //                                    elasticity_components),
+  //                                  elasticity_constant_modes);
+  extract_elasticity_constant_modes_bool<dim>(dof_handler,
+                                         locally_owned_dofs,
+                                         elasticity_constant_modes);
+  elasticity_amg_data.constant_modes = elasticity_constant_modes;
+#  ifdef VERBOSE
+  std::cout << elasticity_constant_modes.size()
+            << " constant modes for elasticity preconditioner" << std::endl;
+  for (unsigned int i = 0; i < elasticity_constant_modes.size(); ++i)
+    {
+      std::cout << elasticity_constant_modes[i].size() << " DoFs per mode"
+                << std::endl;
+      unsigned int count = 0;
+      for (unsigned int j = 0; j < elasticity_constant_modes[i].size(); ++j)
+        if (elasticity_constant_modes[i][j])
+          count++;
+      std::cout << count << " constant modes detected" << std::endl;
+    }
 
-  stokes_amg_data.elliptic              = true;
-  stokes_amg_data.higher_order_elements = true;
-  stokes_amg_data.smoother_sweeps       = 2;
-  stokes_amg_data.aggregation_threshold = 0.02;
+  std::cout << stokes_constant_modes.size()
+            << " constant modes for stokes preconditioner" << std::endl;
+  for (unsigned int i = 0; i < stokes_constant_modes.size(); ++i)
+    {
+      std::cout << stokes_constant_modes[i].size() << " DoFs per mode"
+                << std::endl;
+      unsigned int count = 0;
+      for (unsigned int j = 0; j < stokes_constant_modes[i].size(); ++j)
+        if (stokes_constant_modes[i][j])
+          count++;
+      std::cout << count << " constant modes detected" << std::endl;
+    }
+#  endif
+#endif
+
   stokes_preconditioner->initialize(system_matrix.block(0, 0), stokes_amg_data);
-  mp_preconditioner = std::make_shared<TrilinosWrappers::PreconditionAMG>();
   mp_preconditioner->initialize(pressure_mass.block(1, 1));
 
-  elasticity_preconditioner =
-    std::make_shared<TrilinosWrappers::PreconditionAMG>();
-  const FEValuesExtractors::Vector elasticity_components(dim + 1);
-  std::vector<std::vector<bool>>   elasticity_constant_modes;
-  DoFTools::extract_constant_modes(dof_handler,
-                                   fe_collection.component_mask(elasticity_components),
-                                   elasticity_constant_modes);
-  TrilinosWrappers::PreconditionAMG::AdditionalData elasticity_amg_data;
-  elasticity_amg_data.constant_modes = elasticity_constant_modes;
-
-  elasticity_amg_data.elliptic              = true;
-  elasticity_amg_data.higher_order_elements = true;
-  elasticity_amg_data.smoother_sweeps       = 2;
-  elasticity_amg_data.aggregation_threshold = 0.02;
   elasticity_preconditioner->initialize(system_matrix.block(2, 2),
                                         elasticity_amg_data);
 #ifdef VERBOSE
   pcout << "Preconditioners assembled!" << std::endl;
 #endif
 }
-#ifdef DEBUG
-// not anymore implemented
-void
-FluidStructureProblem::output_matrix() const
-{
-#  ifdef USE_PETSC_LA
-  PetscViewer mat_viewer;
-  // Create an ASCII viewer that writes to "system_matrix.m"
-  PetscViewerASCIIOpen(system_matrix.get_mpi_communicator(),
-                       "system_matrix.m",
-                       &mat_viewer);
-  // Set format to MATLAB (this produces a coordinate list)
-  PetscViewerPushFormat(mat_viewer, PETSC_VIEWER_ASCII_MATLAB);
-  // View the matrix (deal.II object converts to PETSc Mat automatically)
-  MatView(system_matrix, mat_viewer);
-  PetscViewerPopFormat(mat_viewer);
-  PetscViewerDestroy(&mat_viewer);
-  PetscViewer vec_viewer;
-  PetscViewerASCIIOpen(system_rhs.get_mpi_communicator(),
-                       "system_rhs.m",
-                       &vec_viewer);
-
-  // Set format to MATLAB (prints entries one by one)
-  PetscViewerPushFormat(vec_viewer, PETSC_VIEWER_ASCII_MATLAB);
-
-  // View the vector
-  VecView(system_rhs, vec_viewer);
-  PetscViewerPopFormat(vec_viewer);
-  PetscViewerDestroy(&vec_viewer);
-#  endif
-}
-#endif
-#ifdef DIRECT_SOLVER
-// not anymore implemented
-void
-FluidStructureProblem::solve()
-{
-  TimerOutput::Scope t(timer, "solve");
-
-  pcout << "solvingthissutff" << std::endl;
-  LA::MPI::BlockVector completely_distributed_solution(block_owned_dofs,
-                                                       MPI_COMM_WORLD);
-#  ifdef FORCE_USE_OF_TRILINOS
-  SolverControl                  solver_control(1, 0);
-  TrilinosWrappers::SolverDirect direct(solver_control);
-  direct.solve(system_matrix, completely_distributed_solution, system_rhs);
-#  else
-  SolverControl                    cn;
-  PETScWrappers::SparseDirectMUMPS solver(cn, MPI_COMM_WORLD);
-  solver.set_symmetric_mode(false);
-  solver.solve(system_matrix, completely_distributed_solution, system_rhs);
-#  endif
-  constraints.distribute(completely_distributed_solution);
-  locally_relevant_solution = completely_distributed_solution;
-}
-#endif
 
 #ifdef ITERATIVE_SOLVER
 void
@@ -976,10 +1445,14 @@ FluidStructureProblem::solve_iterative()
   LA::MPI::BlockVector completely_distributed_solution(block_owned_dofs,
                                                        MPI_COMM_WORLD);
   // completely_distributed_solution = 1.0;
+#  ifdef EXACT
+  SolverControl solver_control(100000, 1e-16 * system_rhs.l2_norm());
+#  else
   SolverControl solver_control(100000, 1e-6 * system_rhs.l2_norm());
+#  endif
+
 #  ifdef FORCE_USE_OF_TRILINOS
 
-#ifndef DEBUG
   PreconditionBlockTriangularAMG preconditioner;
   preconditioner.initialize(system_matrix.block(0, 0),
                             pressure_mass.block(1, 1),
@@ -990,15 +1463,6 @@ FluidStructureProblem::solve_iterative()
                             stokes_preconditioner,
                             mp_preconditioner,
                             elasticity_preconditioner);
-#else
-  PreconditionBlockTriangular preconditioner;
-  preconditioner.initialize(system_matrix.block(0, 0),
-                            pressure_mass.block(1, 1),
-                            system_matrix.block(1, 0),
-                            system_matrix.block(2, 0),
-                            system_matrix.block(2, 1),
-                            system_matrix.block(2, 2));
-#endif
   SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
   solver.solve(system_matrix,
                completely_distributed_solution,
@@ -1008,19 +1472,6 @@ FluidStructureProblem::solve_iterative()
         << std::endl;
 #  else
   Assert(false, ExcNotImplemented());
-
-  // // PETScWrappers::PreconditionBlockJacobi::AdditionalData data;
-  // // // This tells Block Jacobi to use ILU on the local blocks
-  // // data.internal_preconditioner_type = "ilu";
-  // PETScWrappers::PreconditionBoomerAMG preconditioner(MPI_COMM_WORLD);
-  // preconditioner.initialize(system_matrix);
-  // PETScWrappers::SolverGMRES solver(solver_control, MPI_COMM_WORLD);
-  // solver.solve(system_matrix,
-  //              completely_distributed_solution,
-  //              system_rhs,
-  //              preconditioner);
-  // pcout << "  " << solver_control.last_step() << " GMRES iterations"
-  //       << std::endl;
 #  endif
   constraints.distribute(completely_distributed_solution);
   locally_relevant_solution = completely_distributed_solution;
@@ -1069,7 +1520,17 @@ FluidStructureProblem::output_results(const unsigned int refinement_cycle) const
   data_out.add_data_vector(material,
                            "material_id",
                            DataOut<dim>::type_cell_data);
+#ifdef EXACT
+  ExactSolution_FSI<dim> exact_solution;
+  Vector<double>         exact(locally_relevant_solution.size());
 
+  VectorTools::interpolate(dof_handler, exact_solution, exact);
+
+  data_out.add_data_vector(exact,
+                           "ex",
+                           DataOut<dim>::type_dof_data,
+                           data_component_interpretation);
+#endif
   data_out.build_patches();
 
   data_out.write_vtu_with_pvtu_record(
@@ -1088,7 +1549,10 @@ void
 FluidStructureProblem::refine_mesh(const unsigned int n_cycle)
 {
   TimerOutput::Scope t(timer, "refining");
-
+#ifdef EXACT_TABLE
+  triangulation.refine_global(1);
+  return;
+#endif
   pcout << "   Refining mesh, cycle number " << n_cycle << std::endl;
 
   Vector<float> stokes_estimated_error_per_cell(triangulation.n_active_cells());
@@ -1215,4 +1679,190 @@ FluidStructureProblem::refine_mesh(const unsigned int n_cycle)
 #endif
   pcout << "  Number of elements = " << triangulation.n_global_active_cells()
         << std::endl;
+}
+
+double
+FluidStructureProblem::compute_velocity_error(
+  const VectorTools::NormType &norm_type) const
+{
+  const QGauss<dim> stokes_quadrature(stokes_degree + 2);
+  const QGauss<dim> elasticity_quadrature(elasticity_degree + 2);
+
+  hp::QCollection<dim> q_collection;
+  q_collection.push_back(stokes_quadrature);
+  q_collection.push_back(elasticity_quadrature);
+  Vector<double> error_per_cell(triangulation.n_active_cells());
+
+  ComponentSelectFunction<dim> components(std::make_pair(0, dim),
+                                          dim + 1 + dim);
+
+  VectorTools::integrate_difference(dof_handler,
+                                    locally_relevant_solution,
+                                    ExactSolution_onlyu(),
+                                    error_per_cell,
+                                    q_collection,
+                                    norm_type,
+                                    &components);
+
+  for (const auto &cell : dof_handler.active_cell_iterators())
+    {
+      if (cell->material_id() != fluid_domain_id)
+        error_per_cell[cell->active_cell_index()] = 0.0;
+    }
+
+
+
+  double velocity_error =
+    VectorTools::compute_global_error(triangulation, error_per_cell, norm_type);
+#ifndef EXACT_TABLE
+  std::cout << "Computed velocity error" << std::endl;
+
+  std::cout << "velocity error: " << velocity_error << std::endl;
+#endif
+  return velocity_error;
+}
+
+double
+FluidStructureProblem::compute_pressure_error(
+  const VectorTools::NormType &norm_type) const
+{
+  const QGauss<dim> stokes_quadrature(stokes_degree + 2);
+  const QGauss<dim> elasticity_quadrature(elasticity_degree + 2);
+
+  hp::QCollection<dim> q_collection;
+  q_collection.push_back(stokes_quadrature);
+  q_collection.push_back(elasticity_quadrature);
+  Vector<double> error_per_cell(triangulation.n_active_cells());
+
+  ComponentSelectFunction<dim> components(std::make_pair(dim, dim + 1),
+                                          dim + 1 + dim);
+
+  VectorTools::integrate_difference(dof_handler,
+                                    locally_relevant_solution,
+                                    ExactSolution_p(),
+                                    error_per_cell,
+                                    q_collection,
+                                    norm_type,
+                                    &components);
+
+  for (const auto &cell : dof_handler.active_cell_iterators())
+    {
+      if (cell->material_id() != fluid_domain_id)
+        error_per_cell[cell->active_cell_index()] = 0.0;
+    }
+  double pressure_error =
+    VectorTools::compute_global_error(triangulation, error_per_cell, norm_type);
+
+#ifndef EXACT_TABLE
+  std::cout << "Computed pressure error" << std::endl;
+
+  std::cout << "pressure error: " << pressure_error << std::endl;
+#endif
+  return pressure_error;
+}
+
+
+double
+FluidStructureProblem::compute_displacement_error(
+  const VectorTools::NormType &norm_type) const
+{
+  const QGauss<dim> stokes_quadrature(stokes_degree + 2);
+  const QGauss<dim> elasticity_quadrature(elasticity_degree + 2);
+
+  hp::QCollection<dim> q_collection;
+  q_collection.push_back(stokes_quadrature);
+  q_collection.push_back(elasticity_quadrature);
+  Vector<double> error_per_cell(triangulation.n_active_cells());
+
+  ComponentSelectFunction<dim> components(std::make_pair(dim + 1,
+                                                         dim + 1 + dim),
+                                          dim + 1 + dim);
+
+  VectorTools::integrate_difference(dof_handler,
+                                    locally_relevant_solution,
+                                    ExactSolution_d(),
+                                    error_per_cell,
+                                    q_collection,
+                                    norm_type,
+                                    &components);
+
+  for (const auto &cell : dof_handler.active_cell_iterators())
+    {
+      if (cell->material_id() != solid_domain_id)
+        error_per_cell[cell->active_cell_index()] = 0.0;
+    }
+
+
+
+  double displacement_error =
+    VectorTools::compute_global_error(triangulation, error_per_cell, norm_type);
+#ifndef EXACT_TABLE
+  std::cout << "Computed displacement error" << std::endl;
+  std::cout << "displacement error: " << displacement_error << std::endl;
+#endif
+  return displacement_error;
+}
+
+void
+FluidStructureProblem::compute_error(const unsigned int refinement_cycle)
+{
+#ifndef EXACT_TABLE
+  pcout << "L2_norm:" << std::endl;
+#endif
+  double L2_error_velocity = compute_velocity_error(VectorTools::L2_norm);
+  double L2_error_pressure = compute_pressure_error(VectorTools::L2_norm);
+  double L2_error_displacement =
+    compute_displacement_error(VectorTools::L2_norm);
+#ifndef EXACT_TABLE
+  pcout << "H1_norm:" << std::endl;
+#endif
+  double H1_error_velocity = compute_velocity_error(VectorTools::H1_norm);
+  double H1_error_pressure = compute_pressure_error(VectorTools::H1_norm);
+  double H1_error_displacement =
+    compute_displacement_error(VectorTools::H1_norm);
+#ifdef EXACT_TABLE
+  const double h = 2.0 / (problemsize * std::pow(2, refinement_cycle));
+  velocity_convergence_table.add_value("h", h);
+  velocity_convergence_table.add_value("L2", L2_error_velocity);
+  velocity_convergence_table.add_value("H1", H1_error_velocity);
+  pressure_convergence_table.add_value("h", h);
+  pressure_convergence_table.add_value("L2", L2_error_pressure);
+  pressure_convergence_table.add_value("H1", H1_error_pressure);
+  displacement_convergence_table.add_value("h", h);
+  displacement_convergence_table.add_value("L2", L2_error_displacement);
+  displacement_convergence_table.add_value("H1", H1_error_displacement);
+#endif
+}
+
+
+void
+FluidStructureProblem::output_table()
+{
+#ifdef EXACT_TABLE
+  pcout << "Velocity" << std::endl;
+  velocity_convergence_table.evaluate_all_convergence_rates(
+    ConvergenceTable::reduction_rate_log2);
+
+  velocity_convergence_table.set_scientific("L2", true);
+  velocity_convergence_table.set_scientific("H1", true);
+
+  velocity_convergence_table.write_text(std::cout);
+  pcout << "Pressure" << std::endl;
+
+  pressure_convergence_table.evaluate_all_convergence_rates(
+    ConvergenceTable::reduction_rate_log2);
+
+  pressure_convergence_table.set_scientific("L2", true);
+  pressure_convergence_table.set_scientific("H1", true);
+  pressure_convergence_table.write_text(std::cout);
+  pcout << "Displacement" << std::endl;
+
+  displacement_convergence_table.evaluate_all_convergence_rates(
+    ConvergenceTable::reduction_rate_log2);
+
+  displacement_convergence_table.set_scientific("L2", true);
+  displacement_convergence_table.set_scientific("H1", true);
+
+  displacement_convergence_table.write_text(std::cout);
+#endif
 }

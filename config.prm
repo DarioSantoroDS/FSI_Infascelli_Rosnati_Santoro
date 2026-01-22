@@ -9,11 +9,31 @@ end
 # fluid and solid weight only if the triangulation weighted partitioning is enabled
 
 subsection Refinement
-  set Refinement cycles = 8
+  set Refinement cycles = 4
 end
 
 subsection Physics
-  set Viscosity = 2.0
+  set Viscosity = 1.0
   set mu = 1.0
   set lambda = 1.0
+end
+
+subsection Stokes AMG
+  set Smoother sweeps       = 2
+  set Aggregation threshold = 1e-2
+  set Number of cycles      = 1
+  set W cycle               = false
+  set Smoother overlap      = 0
+  set Output details        = false
+  set Smoother type         = Chebyshev
+end
+
+subsection Elasticity AMG
+  set Smoother sweeps       = 2
+  set Aggregation threshold = 1e-2
+  set Number of cycles      = 1
+  set W cycle               = false
+  set Smoother overlap      = 0
+  set Output details        = false
+  set Smoother type         = Chebyshev
 end
