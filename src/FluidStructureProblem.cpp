@@ -696,6 +696,7 @@ FluidStructureProblem::setup_dofs()
   // initialized
   system_matrix.clear();
   pressure_mass.clear();
+  pressure_laplacian.clear();
   BlockDynamicSparsityPattern dsp(dofs_per_block, dofs_per_block);
 
   Table<2, DoFTools::Coupling> cell_coupling(fe_collection.n_components(),
@@ -757,6 +758,7 @@ FluidStructureProblem::setup_dofs()
                                              locally_relevant_dofs);
   constraints.condense(dsp_pressure);
   pressure_mass.reinit(block_owned_dofs, dsp_pressure, MPI_COMM_WORLD);
+  pressure_laplacian.reinit(block_owned_dofs, dsp_pressure, MPI_COMM_WORLD); 
 #endif
 #ifdef VERBOSE
   pcout << "Dofs initialized!" << std::endl;
@@ -1143,6 +1145,50 @@ FluidStructureProblem::assemble_system()
       constraints.distribute_local_to_global(local_pressure_matrix,
                                              pressure_global_dof_indices,
                                              pressure_mass);
+      // Now we assemble the pressure Laplacian matrix
+      // Resize the small structures
+      const unsigned int n_pressure_dofs_ = pressure_local_indices.size();
+      FullMatrix<double> local_pressure_matrix_(n_pressure_dofs_,
+                                               n_pressure_dofs_);
+      std::vector<types::global_dof_index> pressure_global_dof_indices_(
+        n_pressure_dofs_);
+
+      // Fill the small matrix and indices
+      for (unsigned int i = 0; i < n_pressure_dofs_; ++i)
+        {
+          const unsigned int original_i_  = pressure_local_indices[i];
+          pressure_global_dof_indices_[i] = dof_indices[original_i_];
+
+          for (unsigned int j = 0; j < n_pressure_dofs_; ++j)
+            {
+              const unsigned int original_j = pressure_local_indices[j];
+
+              double value_ = 0.0;
+              for (unsigned int q = 0; q < fe_values.n_quadrature_points; ++q)
+                {
+                  // CHANGE: Use gradients instead of shape values
+                  const Tensor<1, dim> grad_phi_i =
+                    fe_values[pressure].gradient(original_i_, q);
+                  const Tensor<1, dim> grad_phi_j_ =
+                    fe_values[pressure].gradient(original_j, q);
+
+                  // CHANGE: Form the Laplacian (grad_phi_i * grad_phi_j_)
+                  // We keep the viscosity scaling consistent with the Schur
+                  // complement approximation
+                    value_ +=
+                    (grad_phi_i * grad_phi_j_) / viscosity * fe_values.JxW(q);
+                }
+              local_pressure_matrix_(i, j) = value_;
+            }
+        }
+
+      // Distribute to the new Laplacian matrix
+      // Make sure you have declared 'pressure_laplacian' in your class
+      // and initialized it with the same sparsity pattern as pressure_mass
+      constraints.distribute_local_to_global(local_pressure_matrix_,
+                                             pressure_global_dof_indices_,
+                                             pressure_laplacian);
+
       // The more interesting part of this function is where
       // we see about
       // face terms along the interface between the two subdomains. To this
@@ -1516,9 +1562,9 @@ FluidStructureProblem::solve_iterative()
 
 #  ifdef FORCE_USE_OF_TRILINOS
 
-  PreconditionBlockTriangularAMG preconditioner;
+  PreconditionBlockTriangularSimple preconditioner;
   preconditioner.initialize(system_matrix.block(0, 0),
-                            pressure_mass.block(1, 1),
+                            pressure_laplacian.block(1, 1),
                             system_matrix.block(1, 0),
                             system_matrix.block(2, 0),
                             system_matrix.block(2, 1),
